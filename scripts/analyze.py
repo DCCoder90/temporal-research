@@ -33,8 +33,9 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 REPORTS_DIR = PROJECT_ROOT / "captures" / "reports"
 
-# Static IP → container name map (matches docker-compose.yml)
-IP_TO_NAME: dict[str, str] = {
+# IP → container name, loaded from docker-compose.yml when pyyaml is available.
+# Falls back to a hardcoded snapshot so the script works even without the dep.
+_HARDCODED_IP_TO_NAME: dict[str, str] = {
     "172.20.0.10": "postgresql",
     "172.20.0.20": "temporal",
     "172.20.0.30": "temporal-ui",
@@ -47,6 +48,40 @@ IP_TO_NAME: dict[str, str] = {
     "172.20.0.46": "saga-worker",
     "172.20.0.50": "wireshark",
 }
+
+
+def _load_ip_map_from_compose(compose_path: Path) -> dict[str, str] | None:
+    """Parse docker-compose.yml and return {ip: container_name} for all services
+    that have a static IPv4 address. Returns None if parsing fails for any reason.
+    """
+    try:
+        import yaml  # pyyaml
+    except ImportError:
+        return None
+    try:
+        with compose_path.open() as f:
+            doc = yaml.safe_load(f)
+        ip_map: dict[str, str] = {}
+        for svc in (doc.get("services") or {}).values():
+            name = svc.get("container_name")
+            networks = svc.get("networks") or {}
+            for net_cfg in networks.values():
+                if isinstance(net_cfg, dict):
+                    ip = net_cfg.get("ipv4_address")
+                    if ip and name:
+                        ip_map[str(ip)] = name
+        return ip_map or None
+    except Exception:
+        return None
+
+
+IP_TO_NAME: dict[str, str] = (
+    _load_ip_map_from_compose(PROJECT_ROOT / "docker-compose.yml")
+    or _HARDCODED_IP_TO_NAME
+)
+
+# Reverse map: container name → IP (for resolving --only-host / --exclude-host specs)
+NAME_TO_IP: dict[str, str] = {v: k for k, v in IP_TO_NAME.items()}
 
 # Well-known ports → human labels
 PORT_LABELS: dict[str, str] = {
@@ -74,6 +109,28 @@ _GRPC_PROTO_NAMES = {"grpc", "http2"}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _parse_host_specs(specs: list[str]) -> tuple[set[str], set[str]]:
+    """Normalise a list of host specs (IPs or container names) into two sets.
+
+    Returns:
+        (ips, names) where *ips* is used to match raw packet src/dst fields and
+        *names* is used to match the resolved container names in gRPC call tuples.
+    """
+    ips: set[str] = set()
+    names: set[str] = set()
+    for spec in specs:
+        if spec in NAME_TO_IP:          # caller gave a container name
+            ips.add(NAME_TO_IP[spec])
+            names.add(spec)
+        elif spec in IP_TO_NAME:        # caller gave a known IP
+            ips.add(spec)
+            names.add(IP_TO_NAME[spec])
+        else:                           # unknown spec — pass through as-is
+            ips.add(spec)
+            names.add(spec)
+    return ips, names
+
 
 def resolve(ip: str) -> str:
     """Map a container IP to its name, or return the raw IP if unknown."""
@@ -115,21 +172,34 @@ def apply_filter(
     grpc_calls: list[tuple],
     only: list[str] | None,
     exclude: list[str] | None,
+    only_hosts: list[str] | None = None,
+    exclude_hosts: list[str] | None = None,
 ) -> tuple[list[dict], list[tuple]]:
-    """Filter packets and grpc_calls according to --only / --exclude flags."""
-    if not only and not exclude:
-        return packets, grpc_calls
+    """Filter packets and grpc_calls by protocol and/or host.
 
+    Protocol and host filters are ANDed: a packet must satisfy both.
+    """
+    # ── Protocol filter ────────────────────────────────────────────────────────
     if only:
         protos = [p.lower() for p in only]
         packets = [p for p in packets if any(matches_protocol(p, pr) for pr in protos)]
         grpc_included = bool(set(protos) & _GRPC_PROTO_NAMES)
         grpc_calls = grpc_calls if grpc_included else []
-    else:  # exclude
+    elif exclude:
         protos = [p.lower() for p in exclude]
         packets = [p for p in packets if not any(matches_protocol(p, pr) for pr in protos)]
         grpc_excluded = bool(set(protos) & _GRPC_PROTO_NAMES)
         grpc_calls = [] if grpc_excluded else grpc_calls
+
+    # ── Host filter ────────────────────────────────────────────────────────────
+    if only_hosts:
+        host_ips, host_names = _parse_host_specs(only_hosts)
+        packets = [p for p in packets if p["src"] in host_ips or p["dst"] in host_ips]
+        grpc_calls = [c for c in grpc_calls if c[1] in host_names or c[2] in host_names]
+    elif exclude_hosts:
+        host_ips, host_names = _parse_host_specs(exclude_hosts)
+        packets = [p for p in packets if p["src"] not in host_ips and p["dst"] not in host_ips]
+        grpc_calls = [c for c in grpc_calls if c[1] not in host_names and c[2] not in host_names]
 
     return packets, grpc_calls
 
@@ -269,6 +339,71 @@ def build_flow_diagram(packets: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_traffic_sequence_diagram(
+    packets: list[dict],
+    grpc_calls: list[tuple[float, str, str, str]],
+) -> str:
+    """Mermaid sequenceDiagram showing all protocol traffic in chronological order.
+
+    Port-7233 (gRPC) packets are replaced by the richer method-level data from
+    grpc_calls so each arrow shows the actual RPC name rather than "HTTP2".
+    All other traffic uses tshark's Protocol column label (e.g. PGSQL, HTTP, TCP).
+    """
+    events: list[tuple[float, str, str, str]] = []
+
+    for p in packets:
+        if p["dport"] == "7233" or p["sport"] == "7233":
+            continue  # replaced by grpc_calls entries below
+        src = resolve(p["src"])
+        dst = resolve(p["dst"])
+        label = p["proto"] if p["proto"] else PORT_LABELS.get(
+            p["dport"], f"TCP:{p['dport']}" if p["dport"] else "TCP"
+        )
+        events.append((p["t"], src, dst, label))
+
+    for t, src, dst, method in grpc_calls:
+        events.append((t, src, dst, method))
+
+    events.sort(key=lambda x: x[0])
+
+    if not events:
+        return (
+            "sequenceDiagram\n"
+            "    Note over temporal: No traffic decoded in this capture"
+        )
+
+    seen: dict[str, None] = {}
+    for _, src, dst, _ in events:
+        seen.setdefault(src, None)
+        seen.setdefault(dst, None)
+
+    lines = ["sequenceDiagram"]
+    for p in seen:
+        lines.append(f"    participant {mermaid_id(p)} as {p}")
+    lines.append("")
+
+    compressed: list[list] = []
+    for _, src, dst, label in events:
+        if compressed and compressed[-1][:3] == [src, dst, label]:
+            compressed[-1][3] += 1
+        else:
+            compressed.append([src, dst, label, 1])
+
+    total = len(compressed)
+    for src, dst, label, count in compressed[:MAX_SEQ_ENTRIES]:
+        sid, did = mermaid_id(src), mermaid_id(dst)
+        display = f"{label} (x{fmt_num(count)})" if count > 1 else label
+        lines.append(f"    {sid}->>{did}: {display}")
+
+    if total > MAX_SEQ_ENTRIES:
+        omitted = total - MAX_SEQ_ENTRIES
+        lines.append(
+            f"    Note over temporal: ... {fmt_num(omitted)} more event type(s) not shown (cap: {MAX_SEQ_ENTRIES})"
+        )
+
+    return "\n".join(lines)
+
+
 def build_sequence_diagram(calls: list[tuple[float, str, str, str]]) -> str:
     """Mermaid sequenceDiagram with consecutive identical calls compressed."""
     if not calls:
@@ -398,13 +533,14 @@ _HTML_TEMPLATE = """\
     </div>
   </div>
 
+{traffic_seq_section}
   <h2>gRPC Sequence Diagram</h2>
   <p class="hint">Consecutive identical calls from the same source are compressed (xN). Sequence numbers show call order.</p>
   <div class="card">
     <div class="card-toolbar">
-      <button onclick="zoomIn(1)">＋ Zoom in</button>
-      <button onclick="zoomOut(1)">－ Zoom out</button>
-      <button onclick="resetZoom(1)">⟳ Reset</button>
+      <button onclick="zoomIn({grpc_idx})">＋ Zoom in</button>
+      <button onclick="zoomOut({grpc_idx})">－ Zoom out</button>
+      <button onclick="resetZoom({grpc_idx})">⟳ Reset</button>
       <span class="zoom-hint">Scroll to zoom &nbsp;·&nbsp; Drag to pan</span>
     </div>
     <div class="diagram-wrap">
@@ -464,6 +600,7 @@ _HTML_TEMPLATE = """\
 def generate_html(
     pcap_name: str,
     flow: str,
+    traffic_seq: str | None,
     seq: str,
     duration: float,
     total_pkts: int,
@@ -475,6 +612,32 @@ def generate_html(
         badge = f'<span style="background:#fff3cd;color:#856404;"><strong>Filter:</strong> {filter_desc}</span>'
     else:
         badge = ""
+
+    if traffic_seq is not None:
+        traffic_seq_section = (
+            "\n  <h2>Traffic Sequence Diagram</h2>\n"
+            "  <p class=\"hint\">All protocol traffic in chronological order."
+            " gRPC arrows show the RPC method name; others show the protocol label."
+            " Consecutive identical events are compressed (xN).</p>\n"
+            "  <div class=\"card\">\n"
+            "    <div class=\"card-toolbar\">\n"
+            "      <button onclick=\"zoomIn(1)\">&#xFF0B; Zoom in</button>\n"
+            "      <button onclick=\"zoomOut(1)\">&#xFF0D; Zoom out</button>\n"
+            "      <button onclick=\"resetZoom(1)\">&#x27F3; Reset</button>\n"
+            "      <span class=\"zoom-hint\">Scroll to zoom &nbsp;&middot;&nbsp; Drag to pan</span>\n"
+            "    </div>\n"
+            "    <div class=\"diagram-wrap\">\n"
+            "      <div class=\"mermaid\">\n"
+            f"{traffic_seq}\n"
+            "      </div>\n"
+            "    </div>\n"
+            "  </div>"
+        )
+        grpc_idx = 2
+    else:
+        traffic_seq_section = ""
+        grpc_idx = 1
+
     return _HTML_TEMPLATE.format(
         filename=pcap_name,
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -485,6 +648,8 @@ def generate_html(
         flow_diagram=flow,
         sequence_diagram=seq,
         filter_badge=badge,
+        traffic_seq_section=traffic_seq_section,
+        grpc_idx=grpc_idx,
     )
 
 
@@ -717,11 +882,19 @@ Protocol names (case-insensitive):
   arp             ARP packets
   <other>         Matched against tshark's Protocol column (e.g. ICMPv6, DNS)
 
+Host specs (--only-host / --exclude-host):
+  Container names (e.g. postgresql, temporal, hello-world-worker) or raw IPs.
+  Matches any packet where the host is the source OR destination.
+  Host and protocol filters are ANDed when both are specified.
+
 Examples:
-  analyze.sh capture.pcap                         # all protocols
-  analyze.sh capture.pcap --only grpc             # gRPC traffic only
-  analyze.sh capture.pcap --only grpc,http        # gRPC + Temporal UI
-  analyze.sh capture.pcap --exclude pgsql,tcp     # hide PostgreSQL and raw TCP
+  analyze.sh capture.pcap                                        # all traffic
+  analyze.sh capture.pcap --only grpc                           # gRPC only
+  analyze.sh capture.pcap --only grpc,http                      # gRPC + UI
+  analyze.sh capture.pcap --exclude pgsql,tcp                   # hide PostgreSQL and raw TCP
+  analyze.sh capture.pcap --only-host hello-world-worker        # single worker only
+  analyze.sh capture.pcap --exclude-host wireshark,temporal-ui  # hide noise
+  analyze.sh capture.pcap --only grpc --only-host hello-world-worker  # combine filters
 """,
     )
     parser.add_argument("pcap", help="Path to the .pcap file to analyze")
@@ -737,6 +910,18 @@ Examples:
         metavar="PROTOS",
         help="Comma-separated list of protocols to exclude",
     )
+
+    host_group = parser.add_mutually_exclusive_group()
+    host_group.add_argument(
+        "--only-host", "--oh",
+        metavar="HOSTS",
+        help="Comma-separated list of hosts (names or IPs) to include; all others are hidden",
+    )
+    host_group.add_argument(
+        "--exclude-host", "--xh",
+        metavar="HOSTS",
+        help="Comma-separated list of hosts (names or IPs) to exclude",
+    )
     return parser
 
 
@@ -749,15 +934,21 @@ def main() -> None:
         sys.exit(1)
 
     # Parse filter lists and build a human-readable description.
-    only    = [p.strip() for p in args.only.split(",")]    if args.only    else None
-    exclude = [p.strip() for p in args.exclude.split(",")]  if args.exclude else None
+    only         = [p.strip() for p in args.only.split(",")]         if args.only         else None
+    exclude      = [p.strip() for p in args.exclude.split(",")]      if args.exclude      else None
+    only_hosts   = [h.strip() for h in args.only_host.split(",")]    if args.only_host    else None
+    exclude_hosts= [h.strip() for h in args.exclude_host.split(",")] if args.exclude_host else None
 
+    filter_parts: list[str] = []
     if only:
-        filter_desc = "only: " + ", ".join(only)
+        filter_parts.append("only: " + ", ".join(only))
     elif exclude:
-        filter_desc = "exclude: " + ", ".join(exclude)
-    else:
-        filter_desc = None
+        filter_parts.append("exclude: " + ", ".join(exclude))
+    if only_hosts:
+        filter_parts.append("host: " + ", ".join(only_hosts))
+    elif exclude_hosts:
+        filter_parts.append("exclude-host: " + ", ".join(exclude_hosts))
+    filter_desc = " | ".join(filter_parts) if filter_parts else None
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     html_path  = REPORTS_DIR / f"{pcap.stem}_flow.html"
@@ -777,7 +968,7 @@ def main() -> None:
     grpc = extract_grpc_calls(pcap)
 
     print("  [3/4] Applying filter ..." if filter_desc else "  [3/4] No filter applied.")
-    packets, grpc = apply_filter(packets, grpc, only, exclude)
+    packets, grpc = apply_filter(packets, grpc, only, exclude, only_hosts, exclude_hosts)
     if not packets:
         print("Error: no packets remain after filtering.", file=sys.stderr)
         sys.exit(1)
@@ -787,7 +978,13 @@ def main() -> None:
     print("  [4/4] Building diagrams and statistics ...")
     flow  = build_flow_diagram(packets)
     seq   = build_sequence_diagram(grpc)
-    html  = generate_html(pcap.name, flow, seq, duration, len(packets), total_bytes, len(grpc), filter_desc)
+
+    # Omit the Traffic Sequence Diagram when the user requested gRPC-only output.
+    _grpc_only_protos = _GRPC_PROTO_NAMES  # {"grpc", "http2"}
+    show_traffic_seq = not (only and set(p.lower() for p in only) <= _grpc_only_protos)
+    traffic_seq = build_traffic_sequence_diagram(packets, grpc) if show_traffic_seq else None
+
+    html  = generate_html(pcap.name, flow, traffic_seq, seq, duration, len(packets), total_bytes, len(grpc), filter_desc)
     stats = generate_stats(pcap.name, packets, grpc, duration, filter_desc)
     html_path.write_text(html, encoding="utf-8")
     stats_path.write_text(stats, encoding="utf-8")
