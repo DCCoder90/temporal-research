@@ -320,7 +320,7 @@ _HTML_TEMPLATE = """\
 <head>
   <meta charset="UTF-8">
   <title>Temporal Analysis — {filename}</title>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
   <style>
     * {{ box-sizing: border-box; }}
