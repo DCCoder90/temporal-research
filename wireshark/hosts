@@ -5,5 +5,9 @@
 172.20.0.20  temporal
 172.20.0.30  temporal-ui
 172.20.0.40  hello-world-worker
-172.20.0.41  hello-world-starter
+172.20.0.42  scheduled-worker
+172.20.0.43  signals-worker
+172.20.0.44  child-workflows-worker
+172.20.0.45  retries-worker
+172.20.0.46  saga-worker
 172.20.0.50  wireshark
