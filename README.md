@@ -179,15 +179,16 @@ All data is ephemeral — PostgreSQL uses a tmpfs mount and is wiped on shutdown
 ```
 docker-compose.yml          # All containers
 temporal-config/            # Temporal server dynamic config
-hello-world/                # Auto-runs on docker compose up
-scheduled/                  # Temporal Schedules (periodic trigger)
-signals/                    # Signals + queries (approval workflow)
-child-workflows/            # Parallel child workflow fan-out
-retries/                    # Activity retries with exponential backoff
-saga/                       # Saga pattern with compensation
+examples/
+  hello-world/              # Simple hello-world workflow
+  scheduled/                # Temporal Schedules (periodic trigger)
+  signals/                  # Signals + queries (approval workflow)
+  child-workflows/          # Parallel child workflow fan-out
+  retries/                  # Activity retries with exponential backoff
+  saga/                     # Saga pattern with compensation
   Each example follows the same layout:
     workflow/workflow.go    # Workflow + Activity definitions
-    worker/                 # Worker (always running, polls task queue)
+    worker/                 # Worker (manual: docker compose run --rm)
     starter/                # Starter (manual: docker compose run --rm)
 tshark/Dockerfile           # Minimal tshark capture image
 captures/                   # Rolling pcap files written by tshark

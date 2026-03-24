@@ -113,7 +113,7 @@ services:
   # ── Hello-world worker ───────────────────────────────────────────────────────
   hello-world-worker:
     build:
-      context: ./hello-world
+      context: ./examples/hello-world
       dockerfile: worker/Dockerfile
     container_name: hello-world-worker
     networks:
@@ -129,7 +129,7 @@ services:
   # ── Hello-world starter ──────────────────────────────────────────────────────
   hello-world-starter:
     build:
-      context: ./hello-world
+      context: ./examples/hello-world
       dockerfile: starter/Dockerfile
     container_name: hello-world-starter
     networks:
@@ -146,7 +146,7 @@ services:
   # ── Scheduled workflow worker ────────────────────────────────────────────────
   scheduled-worker:
     build:
-      context: ./scheduled
+      context: ./examples/scheduled
       dockerfile: worker/Dockerfile
     container_name: scheduled-worker
     networks:
@@ -162,7 +162,7 @@ services:
   # ── Signals workflow worker ───────────────────────────────────────────────────
   signals-worker:
     build:
-      context: ./signals
+      context: ./examples/signals
       dockerfile: worker/Dockerfile
     container_name: signals-worker
     networks:
@@ -178,7 +178,7 @@ services:
   # ── Child workflows worker ────────────────────────────────────────────────────
   child-workflows-worker:
     build:
-      context: ./child-workflows
+      context: ./examples/child-workflows
       dockerfile: worker/Dockerfile
     container_name: child-workflows-worker
     networks:
@@ -194,7 +194,7 @@ services:
   # ── Retries workflow worker ───────────────────────────────────────────────────
   retries-worker:
     build:
-      context: ./retries
+      context: ./examples/retries
       dockerfile: worker/Dockerfile
     container_name: retries-worker
     networks:
@@ -210,7 +210,7 @@ services:
   # ── Saga workflow worker ──────────────────────────────────────────────────────
   saga-worker:
     build:
-      context: ./saga
+      context: ./examples/saga
       dockerfile: worker/Dockerfile
     container_name: saga-worker
     networks:
@@ -229,7 +229,7 @@ services:
 
   scheduled-starter:
     build:
-      context: ./scheduled
+      context: ./examples/scheduled
       dockerfile: starter/Dockerfile
     container_name: scheduled-starter
     networks:
@@ -242,7 +242,7 @@ services:
 
   signals-starter:
     build:
-      context: ./signals
+      context: ./examples/signals
       dockerfile: starter/Dockerfile
     container_name: signals-starter
     networks:
@@ -255,7 +255,7 @@ services:
 
   signals-approve:
     build:
-      context: ./signals
+      context: ./examples/signals
       dockerfile: approve/Dockerfile
     container_name: signals-approve
     networks:
@@ -269,7 +269,7 @@ services:
 
   signals-reject:
     build:
-      context: ./signals
+      context: ./examples/signals
       dockerfile: reject/Dockerfile
     container_name: signals-reject
     networks:
@@ -283,7 +283,7 @@ services:
 
   child-workflows-starter:
     build:
-      context: ./child-workflows
+      context: ./examples/child-workflows
       dockerfile: starter/Dockerfile
     container_name: child-workflows-starter
     networks:
@@ -296,7 +296,7 @@ services:
 
   retries-starter:
     build:
-      context: ./retries
+      context: ./examples/retries
       dockerfile: starter/Dockerfile
     container_name: retries-starter
     networks:
@@ -309,7 +309,7 @@ services:
 
   saga-starter:
     build:
-      context: ./saga
+      context: ./examples/saga
       dockerfile: starter/Dockerfile
     container_name: saga-starter
     networks:
@@ -322,7 +322,7 @@ services:
 
   saga-fail-starter:
     build:
-      context: ./saga
+      context: ./examples/saga
       dockerfile: fail-starter/Dockerfile
     container_name: saga-fail-starter
     networks:
