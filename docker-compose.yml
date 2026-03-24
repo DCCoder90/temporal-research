@@ -9,12 +9,21 @@ version: "3.9"
 #   172.20.0.20  temporal          (all Temporal services in one process)
 #   172.20.0.30  temporal-ui
 #   172.20.0.40  hello-world-worker
+#   172.20.0.41  hello-world-starter
 #   172.20.0.42  scheduled-worker
 #   172.20.0.43  signals-worker
 #   172.20.0.44  child-workflows-worker
 #   172.20.0.45  retries-worker
 #   172.20.0.46  saga-worker
 #   172.20.0.50  wireshark         (GUI only — reads pcap files from tshark)
+#   172.20.0.51  scheduled-starter
+#   172.20.0.52  signals-starter
+#   172.20.0.53  signals-approve
+#   172.20.0.54  signals-reject
+#   172.20.0.55  child-workflows-starter
+#   172.20.0.56  retries-starter
+#   172.20.0.57  saga-starter
+#   172.20.0.58  saga-fail-starter
 #
 # tshark uses network_mode: host so it can capture on the
 # "temporal-net" bridge interface and see ALL inter-container traffic.
@@ -233,7 +242,8 @@ services:
       dockerfile: starter/Dockerfile
     container_name: scheduled-starter
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.51
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:
@@ -246,7 +256,8 @@ services:
       dockerfile: starter/Dockerfile
     container_name: signals-starter
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.52
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:
@@ -259,7 +270,8 @@ services:
       dockerfile: approve/Dockerfile
     container_name: signals-approve
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.53
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - WORKFLOW_ID=approval-workflow
@@ -273,7 +285,8 @@ services:
       dockerfile: reject/Dockerfile
     container_name: signals-reject
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.54
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - WORKFLOW_ID=approval-workflow
@@ -287,7 +300,8 @@ services:
       dockerfile: starter/Dockerfile
     container_name: child-workflows-starter
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.55
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:
@@ -300,7 +314,8 @@ services:
       dockerfile: starter/Dockerfile
     container_name: retries-starter
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.56
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:
@@ -313,7 +328,8 @@ services:
       dockerfile: starter/Dockerfile
     container_name: saga-starter
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.57
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:
@@ -326,7 +342,8 @@ services:
       dockerfile: fail-starter/Dockerfile
     container_name: saga-fail-starter
     networks:
-      - temporal-network
+      temporal-network:
+        ipv4_address: 172.20.0.58
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     depends_on:

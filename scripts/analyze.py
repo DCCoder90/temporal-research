@@ -47,6 +47,14 @@ _HARDCODED_IP_TO_NAME: dict[str, str] = {
     "172.20.0.45": "retries-worker",
     "172.20.0.46": "saga-worker",
     "172.20.0.50": "wireshark",
+    "172.20.0.51": "scheduled-starter",
+    "172.20.0.52": "signals-starter",
+    "172.20.0.53": "signals-approve",
+    "172.20.0.54": "signals-reject",
+    "172.20.0.55": "child-workflows-starter",
+    "172.20.0.56": "retries-starter",
+    "172.20.0.57": "saga-starter",
+    "172.20.0.58": "saga-fail-starter",
 }
 
 
