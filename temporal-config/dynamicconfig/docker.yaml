@@ -1,0 +1,14 @@
+# Dynamic configuration for Temporal server running in Docker.
+# These values override compiled-in defaults at runtime.
+
+frontend.enableClientVersionCheck:
+  - value: false
+    constraints: {}
+
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}

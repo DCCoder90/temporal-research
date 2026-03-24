@@ -1,0 +1,258 @@
+version: "3.9"
+
+# ── Network ───────────────────────────────────────────────────────────────────
+# All Temporal services live on this private bridge network with a dedicated
+# subnet. No service ports are published to the host except the three
+# monitoring/UI containers (Wireshark, ntopng, Temporal UI), so the Temporal
+# internals are not reachable from outside Docker.
+#
+# NOTE: `internal: true` is intentionally omitted. On macOS (Docker Desktop)
+# it breaks host→container port-mapping, making the monitoring UIs unreachable.
+# True egress blocking would require host-level firewall rules (e.g. pf/pfctl).
+networks:
+  temporal-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+# ── Services ──────────────────────────────────────────────────────────────────
+services:
+
+  # ── Database ────────────────────────────────────────────────────────────────
+  postgresql:
+    image: postgres:16
+    container_name: temporal-postgresql
+    networks:
+      - temporal-network
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    # Ephemeral storage — data is lost when the container stops.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: on-failure
+
+  # ── Schema setup (one-shot) ──────────────────────────────────────────────────
+  # Creates both `temporal` and `temporal_visibility` databases and applies all
+  # versioned schema migrations. Exits 0 on success so downstream services can
+  # declare service_completed_successfully.
+  temporal-schema-setup:
+    image: temporalio/admin-tools:latest
+    container_name: temporal-schema-setup
+    networks:
+      - temporal-network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    volumes:
+      - ./scripts/temporal-schema-setup.sh:/temporal-schema-setup.sh:ro
+    entrypoint: ["/bin/sh", "/temporal-schema-setup.sh"]
+    restart: "no"
+
+  # ── Temporal frontend ────────────────────────────────────────────────────────
+  # Handles all external gRPC connections (SDK clients, CLI, UI).
+  temporal-frontend:
+    image: temporalio/server:latest
+    container_name: temporal-frontend
+    networks:
+      - temporal-network
+    depends_on:
+      temporal-schema-setup:
+        condition: service_completed_successfully
+    environment:
+      # TEMPORAL_BROADCAST_ADDRESS tells the membership/ringpop subsystem what
+      # address to advertise to other services so they can reach this container.
+      - TEMPORAL_BROADCAST_ADDRESS=temporal-frontend
+      - TEMPORAL_CONFIG_DIR=/etc/temporal/config
+      - TEMPORAL_ENVIRONMENT=docker
+    volumes:
+      - ./temporal-config:/etc/temporal/config:ro
+    command: ["--services=frontend"]
+    restart: on-failure
+
+  # ── Temporal history ─────────────────────────────────────────────────────────
+  # Manages per-workflow execution state and history.
+  temporal-history:
+    image: temporalio/server:latest
+    container_name: temporal-history
+    networks:
+      - temporal-network
+    depends_on:
+      temporal-schema-setup:
+        condition: service_completed_successfully
+    environment:
+      - TEMPORAL_BROADCAST_ADDRESS=temporal-history
+      - TEMPORAL_CONFIG_DIR=/etc/temporal/config
+      - TEMPORAL_ENVIRONMENT=docker
+    volumes:
+      - ./temporal-config:/etc/temporal/config:ro
+    command: ["--services=history"]
+    restart: on-failure
+
+  # ── Temporal matching ────────────────────────────────────────────────────────
+  # Manages task queues and dispatches tasks to available workers.
+  temporal-matching:
+    image: temporalio/server:latest
+    container_name: temporal-matching
+    networks:
+      - temporal-network
+    depends_on:
+      temporal-schema-setup:
+        condition: service_completed_successfully
+    environment:
+      - TEMPORAL_BROADCAST_ADDRESS=temporal-matching
+      - TEMPORAL_CONFIG_DIR=/etc/temporal/config
+      - TEMPORAL_ENVIRONMENT=docker
+    volumes:
+      - ./temporal-config:/etc/temporal/config:ro
+    command: ["--services=matching"]
+    restart: on-failure
+
+  # ── Temporal worker service ──────────────────────────────────────────────────
+  # Runs Temporal's internal system workflows (e.g. archival, replication).
+  # NOTE: this is Temporal's own internal worker, not your application worker.
+  temporal-worker-service:
+    image: temporalio/server:latest
+    container_name: temporal-worker-service
+    networks:
+      - temporal-network
+    depends_on:
+      temporal-schema-setup:
+        condition: service_completed_successfully
+    environment:
+      - TEMPORAL_BROADCAST_ADDRESS=temporal-worker-service
+      - TEMPORAL_CONFIG_DIR=/etc/temporal/config
+      - TEMPORAL_ENVIRONMENT=docker
+    volumes:
+      - ./temporal-config:/etc/temporal/config:ro
+    command: ["--services=worker"]
+    restart: on-failure
+
+  # ── Namespace setup (one-shot) ───────────────────────────────────────────────
+  # Creates the `default` namespace once the frontend is accepting RPCs.
+  temporal-namespace-setup:
+    image: temporalio/admin-tools:latest
+    container_name: temporal-namespace-setup
+    networks:
+      - temporal-network
+    depends_on:
+      temporal-frontend:
+        condition: service_started
+      temporal-history:
+        condition: service_started
+      temporal-matching:
+        condition: service_started
+      temporal-worker-service:
+        condition: service_started
+    volumes:
+      - ./scripts/temporal-namespace-setup.sh:/temporal-namespace-setup.sh:ro
+    entrypoint: ["/bin/sh", "/temporal-namespace-setup.sh"]
+    restart: "no"
+
+  # ── Temporal web UI ──────────────────────────────────────────────────────────
+  # Browser-based dashboard for inspecting workflows, task queues, and namespaces.
+  # Exposed on host port 8080.
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: temporal-ui
+    networks:
+      - temporal-network
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:8080
+    depends_on:
+      - temporal-frontend
+    restart: on-failure
+
+  # ── Hello-world worker ───────────────────────────────────────────────────────
+  # Your Go worker — registers HelloWorldWorkflow and HelloWorldActivity on the
+  # 'hello-world-task-queue' and polls for tasks.
+  hello-world-worker:
+    build:
+      context: ./hello-world
+      dockerfile: worker/Dockerfile
+    container_name: hello-world-worker
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
+    depends_on:
+      temporal-namespace-setup:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  # ── Hello-world starter ──────────────────────────────────────────────────────
+  # Starts a single HelloWorldWorkflow execution, waits for the result, prints
+  # it, then exits. Re-run with: docker compose restart hello-world-starter
+  hello-world-starter:
+    build:
+      context: ./hello-world
+      dockerfile: starter/Dockerfile
+    container_name: hello-world-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
+    depends_on:
+      hello-world-worker:
+        condition: service_started
+    restart: "no"
+
+  # ── Wireshark (web GUI) ──────────────────────────────────────────────────────
+  # Full Wireshark GUI served via KasmVNC. Open http://localhost:3000 in your
+  # browser. Inside Wireshark, capture on eth0 (the temporal-network interface)
+  # with promiscuous mode enabled to see all inter-container traffic.
+  #
+  # NET_ADMIN + NET_RAW capabilities allow the container to put eth0 into
+  # promiscuous mode so it receives frames destined for all containers on the
+  # bridge, not just itself.
+  wireshark:
+    image: lscr.io/linuxserver/wireshark:latest
+    container_name: wireshark
+    networks:
+      - temporal-network
+    ports:
+      - "3000:3000"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    restart: unless-stopped
+
+  # ── ntopng (web traffic analytics) ──────────────────────────────────────────
+  # Real-time network traffic analytics dashboard. Open http://localhost:3001
+  # in your browser. No login required (--disable-login=1).
+  #
+  # -i eth0          : monitor the temporal-network interface
+  # --community      : community (free) edition
+  # -w 3000          : web UI on port 3000 inside the container
+  # --disable-login=1: skip authentication for easy access
+  ntopng:
+    image: ntop/ntopng:latest
+    container_name: ntopng
+    networks:
+      - temporal-network
+    ports:
+      - "3001:3000"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    command:
+      - "-i=eth0"
+      - "--community"
+      - "-w=3000"
+      - "--disable-login=1"
+      - "-d=/var/lib/ntopng"
+    restart: unless-stopped
