@@ -2,8 +2,7 @@ version: "3.9"
 
 # ── Network ───────────────────────────────────────────────────────────────────
 # All containers live on this private bridge network.
-# No service ports are published to the host except the three
-# monitoring/UI containers (Wireshark, ntopng, Temporal UI).
+# No service ports are published to the host except Wireshark and Temporal UI.
 #
 # Static IP map:
 #   172.20.0.10  postgresql
@@ -13,7 +12,7 @@ version: "3.9"
 #   172.20.0.41  hello-world-starter
 #   172.20.0.50  wireshark         (GUI only — reads pcap files from tshark)
 #
-# tshark and ntopng use network_mode: host so they can capture on the
+# tshark uses network_mode: host so it can capture on the
 # "temporal-net" bridge interface and see ALL inter-container traffic.
 #
 # NOTE on single Temporal container: Temporal v1.29+ performs a non-idempotent
@@ -175,24 +174,3 @@ services:
       - ./captures:/captures:ro
     restart: unless-stopped
 
-  # ── ntopng (traffic analytics) ───────────────────────────────────────────────
-  # Open http://localhost:3001 — no login required.
-  ntopng:
-    image: ntop/ntopng:latest
-    platform: linux/amd64
-    container_name: ntopng
-    network_mode: host
-    depends_on:
-      - tshark
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    command:
-      - "-i"
-      - "temporal-net"
-      - "--community"
-      - "--http-port=3001"
-      - "--disable-login=1"
-      - "-d"
-      - "/var/lib/ntopng"
-    restart: unless-stopped

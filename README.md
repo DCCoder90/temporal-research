@@ -1,6 +1,8 @@
 # temporalcoms
 
-A local Temporal cluster running as individual Docker containers, with a Go "hello world" workflow and two packet-inspection tools for observing network traffic.
+A local Temporal cluster running as individual Docker containers, with a Go "hello world" workflow and Wireshark for observing network traffic.
+
+> Vibe-coded with [Claude Code](https://github.com/anthropics/claude-code).
 
 ## Prerequisites
 
@@ -45,7 +47,6 @@ docker compose logs -f hello-world-starter
 |---|---|
 | http://localhost:8080 | Temporal UI — browse workflows, task queues, namespaces |
 | http://localhost:3000 | Wireshark — full packet capture GUI |
-| http://localhost:3001 | ntopng — real-time traffic analytics dashboard |
 
 ## Using Wireshark
 
@@ -73,11 +74,6 @@ To open a capture:
 | `tcp.port == 5432` | PostgreSQL only — useful for watching schema/persistence activity |
 | `tcp.port == 8080` | Temporal UI HTTP traffic |
 
-## Using ntopng
-
-1. Open http://localhost:3001 — no login required
-2. The dashboard shows live flows between containers on the Temporal network
-3. Use **Flows** or **Hosts** in the top nav to drill into specific traffic
 
 ## Tear down
 
