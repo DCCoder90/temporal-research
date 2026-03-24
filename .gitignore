@@ -1,0 +1,9 @@
+# Packet captures
+captures/*.pcap
+
+# macOS
+.DS_Store
+
+# Go build artifacts
+hello-world/worker/worker
+hello-world/starter/starter

@@ -49,10 +49,29 @@ docker compose logs -f hello-world-starter
 
 ## Using Wireshark
 
+Packet capture is split across two containers:
+
+- **tshark** runs with host networking, captures all traffic on the `temporal-net` bridge, and writes a rolling ring-buffer of pcap files (5 × 50 MB) to `./captures/`
+- **wireshark** provides the web GUI at http://localhost:3000 and mounts `./captures` read-only
+
+To open a capture:
 1. Open http://localhost:3000 in your browser
-2. Double-click the **eth0** interface to start a capture
-3. To see *all* inter-container traffic (not just packets to/from Wireshark itself), go to **Capture → Options**, select eth0, and tick **Enable promiscuous mode**
-4. Use display filters as normal, e.g. `tcp.port == 7233` to isolate Temporal gRPC traffic
+2. In the Wireshark GUI, go to **File → Open** and navigate to `/captures/`
+3. Open the latest `temporal_*.pcap` file
+4. Enable **View → Name Resolution → Resolve Network Addresses** to see container names instead of IPs
+
+### Useful display filters
+
+| Filter | What it shows |
+|---|---|
+| `tcp.port == 7233` | All Temporal gRPC traffic |
+| `ip.src_host != "wireshark" && ip.dst_host != "wireshark" && !pgsql` | Everything except Wireshark's own traffic and PostgreSQL chatter — good starting point |
+| `tcp.port == 7233 && ip.src_host != "wireshark" && ip.dst_host != "wireshark"` | Only Temporal gRPC, no Wireshark noise |
+| `(ip.src_host == "hello-world-worker" \|\| ip.dst_host == "hello-world-worker")` | All traffic to/from the worker |
+| `(ip.src_host == "hello-world-starter" \|\| ip.dst_host == "hello-world-starter")` | All traffic to/from the starter (workflow submission) |
+| `ip.src_host == "temporal" \|\| ip.dst_host == "temporal"` | All traffic in and out of the Temporal server |
+| `tcp.port == 5432` | PostgreSQL only — useful for watching schema/persistence activity |
+| `tcp.port == 8080` | Temporal UI HTTP traffic |
 
 ## Using ntopng
 
@@ -71,11 +90,13 @@ All data is ephemeral — PostgreSQL uses a tmpfs mount and is wiped on shutdown
 ## Project layout
 
 ```
-docker-compose.yml          # All 12 containers
-temporal-config/            # Temporal server config + dynamic config
-scripts/                    # One-shot setup scripts (schema, namespace)
+docker-compose.yml          # All containers
+temporal-config/            # Temporal server dynamic config
 hello-world/
   workflow/workflow.go      # Workflow + Activity definitions
   worker/                   # Go worker (polls task queue)
   starter/                  # Go starter (fires one workflow run)
+tshark/Dockerfile           # Minimal tshark capture image
+captures/                   # Rolling pcap files written by tshark
+wireshark/hosts             # Static IP → container name mappings
 ```
