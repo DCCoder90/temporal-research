@@ -9,11 +9,20 @@ version: "3.9"
 #   172.20.0.20  temporal          (all Temporal services in one process)
 #   172.20.0.30  temporal-ui
 #   172.20.0.40  hello-world-worker
-#   172.20.0.41  hello-world-starter
+#   172.20.0.42  scheduled-worker
+#   172.20.0.43  signals-worker
+#   172.20.0.44  child-workflows-worker
+#   172.20.0.45  retries-worker
+#   172.20.0.46  saga-worker
 #   172.20.0.50  wireshark         (GUI only — reads pcap files from tshark)
 #
 # tshark uses network_mode: host so it can capture on the
 # "temporal-net" bridge interface and see ALL inter-container traffic.
+#
+# All example workflow workers and starters use profiles: [manual] and do NOT
+# start with `docker compose up`. Invoke them explicitly:
+#   docker compose run --rm <starter>     (also starts the worker as a dependency)
+#   docker compose up <worker>            (keep a worker running in the background)
 #
 # NOTE on single Temporal container: Temporal v1.29+ performs a non-idempotent
 # cluster metadata INSERT on every process startup. Running each service in its
@@ -104,7 +113,7 @@ services:
   # ── Hello-world worker ───────────────────────────────────────────────────────
   hello-world-worker:
     build:
-      context: ./hello-world
+      context: ./examples/hello-world
       dockerfile: worker/Dockerfile
     container_name: hello-world-worker
     networks:
@@ -115,11 +124,12 @@ services:
     depends_on:
       - temporal
     restart: on-failure
+    profiles: [manual]
 
   # ── Hello-world starter ──────────────────────────────────────────────────────
   hello-world-starter:
     build:
-      context: ./hello-world
+      context: ./examples/hello-world
       dockerfile: starter/Dockerfile
     container_name: hello-world-starter
     networks:
@@ -131,6 +141,197 @@ services:
       hello-world-worker:
         condition: service_started
     restart: "no"
+    profiles: [manual]
+
+  # ── Scheduled workflow worker ────────────────────────────────────────────────
+  scheduled-worker:
+    build:
+      context: ./examples/scheduled
+      dockerfile: worker/Dockerfile
+    container_name: scheduled-worker
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.42
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+    restart: on-failure
+    profiles: [manual]
+
+  # ── Signals workflow worker ───────────────────────────────────────────────────
+  signals-worker:
+    build:
+      context: ./examples/signals
+      dockerfile: worker/Dockerfile
+    container_name: signals-worker
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.43
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+    restart: on-failure
+    profiles: [manual]
+
+  # ── Child workflows worker ────────────────────────────────────────────────────
+  child-workflows-worker:
+    build:
+      context: ./examples/child-workflows
+      dockerfile: worker/Dockerfile
+    container_name: child-workflows-worker
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.44
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+    restart: on-failure
+    profiles: [manual]
+
+  # ── Retries workflow worker ───────────────────────────────────────────────────
+  retries-worker:
+    build:
+      context: ./examples/retries
+      dockerfile: worker/Dockerfile
+    container_name: retries-worker
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.45
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+    restart: on-failure
+    profiles: [manual]
+
+  # ── Saga workflow worker ──────────────────────────────────────────────────────
+  saga-worker:
+    build:
+      context: ./examples/saga
+      dockerfile: worker/Dockerfile
+    container_name: saga-worker
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.46
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+    restart: on-failure
+    profiles: [manual]
+
+  # ── Manual starters (profiles: [manual]) ─────────────────────────────────────
+  # These do NOT start with `docker compose up`.
+  # Run them explicitly: docker compose run --rm <service-name>
+
+  scheduled-starter:
+    build:
+      context: ./examples/scheduled
+      dockerfile: starter/Dockerfile
+    container_name: scheduled-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - scheduled-worker
+    profiles: [manual]
+
+  signals-starter:
+    build:
+      context: ./examples/signals
+      dockerfile: starter/Dockerfile
+    container_name: signals-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - signals-worker
+    profiles: [manual]
+
+  signals-approve:
+    build:
+      context: ./examples/signals
+      dockerfile: approve/Dockerfile
+    container_name: signals-approve
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - WORKFLOW_ID=approval-workflow
+    depends_on:
+      - signals-worker
+    profiles: [manual]
+
+  signals-reject:
+    build:
+      context: ./examples/signals
+      dockerfile: reject/Dockerfile
+    container_name: signals-reject
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - WORKFLOW_ID=approval-workflow
+    depends_on:
+      - signals-worker
+    profiles: [manual]
+
+  child-workflows-starter:
+    build:
+      context: ./examples/child-workflows
+      dockerfile: starter/Dockerfile
+    container_name: child-workflows-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - child-workflows-worker
+    profiles: [manual]
+
+  retries-starter:
+    build:
+      context: ./examples/retries
+      dockerfile: starter/Dockerfile
+    container_name: retries-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - retries-worker
+    profiles: [manual]
+
+  saga-starter:
+    build:
+      context: ./examples/saga
+      dockerfile: starter/Dockerfile
+    container_name: saga-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - saga-worker
+    profiles: [manual]
+
+  saga-fail-starter:
+    build:
+      context: ./examples/saga
+      dockerfile: fail-starter/Dockerfile
+    container_name: saga-fail-starter
+    networks:
+      - temporal-network
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - saga-worker
+    profiles: [manual]
 
   # ── tshark (packet capture) ──────────────────────────────────────────────────
   # Runs with host networking so it can see the "temporal-net" bridge and
