@@ -1,5 +1,6 @@
-# Packet captures
+# Packet captures and generated reports
 captures/*.pcap
+captures/reports/
 
 # macOS
 .DS_Store
