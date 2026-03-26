@@ -111,6 +111,13 @@ PORT_LABELS: dict[str, str] = {
 # All ports carrying Temporal gRPC (HTTP/2) traffic — used to decode inter-service calls.
 GRPC_PORTS: set[str] = {"7233", "7234", "7235", "7239"}
 
+# Containers excluded by --no-interservice (keeps only frontend + UI traffic).
+_INTERSERVICE_HOSTS: list[str] = [
+    "temporal-history",
+    "temporal-matching",
+    "temporal-internal-worker",
+]
+
 # Maximum compressed rows shown in sequence diagram before truncating
 MAX_SEQ_ENTRIES = 150
 
@@ -195,6 +202,7 @@ def apply_filter(
     exclude: list[str] | None,
     only_hosts: list[str] | None = None,
     exclude_hosts: list[str] | None = None,
+    no_interservice: bool = False,
 ) -> tuple[list[dict], list[tuple]]:
     """Filter packets and grpc_calls by protocol and/or host.
 
@@ -221,6 +229,14 @@ def apply_filter(
         host_ips, host_names = _parse_host_specs(exclude_hosts)
         packets = [p for p in packets if p["src"] not in host_ips and p["dst"] not in host_ips]
         grpc_calls = [c for c in grpc_calls if c[1] not in host_names and c[2] not in host_names]
+
+    # ── Inter-service filter (--no-interservice) ───────────────────────────────
+    # Applied after the main host filter so it combines correctly with
+    # --only-host and --exclude-host (AND semantics).
+    if no_interservice:
+        is_ips, is_names = _parse_host_specs(_INTERSERVICE_HOSTS)
+        packets = [p for p in packets if p["src"] not in is_ips and p["dst"] not in is_ips]
+        grpc_calls = [c for c in grpc_calls if c[1] not in is_names and c[2] not in is_names]
 
     return packets, grpc_calls
 
@@ -922,6 +938,8 @@ Examples:
   analyze.sh capture.pcap --only-host hello-world-worker        # single worker only
   analyze.sh capture.pcap --exclude-host wireshark,temporal-ui  # hide noise
   analyze.sh capture.pcap --only grpc --only-host hello-world-worker  # combine filters
+  analyze.sh capture.pcap --no-interservice                           # hide history/matching/internal-worker
+  analyze.sh capture.pcap --no-interservice --only grpc               # SDK↔frontend gRPC only
 """,
     )
     parser.add_argument("pcap", help="Path to the .pcap file to analyze")
@@ -949,6 +967,18 @@ Examples:
         metavar="HOSTS",
         help="Comma-separated list of hosts (names or IPs) to exclude",
     )
+
+    parser.add_argument(
+        "--no-interservice",
+        action="store_true",
+        default=False,
+        help=(
+            "Exclude traffic to/from Temporal's internal services "
+            "(temporal-history, temporal-matching, temporal-internal-worker). "
+            "Keeps only SDK workers, starters, temporal-frontend, and temporal-ui. "
+            "Can be combined with --only/--exclude and --only-host/--exclude-host."
+        ),
+    )
     return parser
 
 
@@ -975,6 +1005,8 @@ def main() -> None:
         filter_parts.append("host: " + ", ".join(only_hosts))
     elif exclude_hosts:
         filter_parts.append("exclude-host: " + ", ".join(exclude_hosts))
+    if args.no_interservice:
+        filter_parts.append("no-interservice")
     filter_desc = " | ".join(filter_parts) if filter_parts else None
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -995,7 +1027,8 @@ def main() -> None:
     grpc = extract_grpc_calls(pcap)
 
     print("  [3/4] Applying filter ..." if filter_desc else "  [3/4] No filter applied.")
-    packets, grpc = apply_filter(packets, grpc, only, exclude, only_hosts, exclude_hosts)
+    packets, grpc = apply_filter(packets, grpc, only, exclude, only_hosts, exclude_hosts,
+                                  no_interservice=args.no_interservice)
     if not packets:
         print("Error: no packets remain after filtering.", file=sys.stderr)
         sys.exit(1)

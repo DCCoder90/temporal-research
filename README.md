@@ -83,54 +83,14 @@ To open a capture:
 
 ## Analyzing captures
 
-`scripts/analyze.sh` reads a pcap file and writes two output files to `captures/reports/`:
+See **[scripts/ANALYZE.md](scripts/ANALYZE.md)** for full usage, all flags, and output descriptions.
 
-| Output file | Contents |
-|---|---|
-| `<name>_flow.html` | Data-flow diagram, all-protocol traffic sequence diagram, and gRPC sequence diagram (open in any browser) |
-| `<name>_stats.md` | Protocol breakdown, connection matrix, gRPC method call counts, Temporal-specific insights |
-
-All diagrams support zoom (scroll or buttons) and pan (drag).
-
-**Prerequisites** (one-time):
+Quick start:
 ```bash
-brew install wireshark   # provides tshark
-pip install pyyaml       # optional — enables auto-loading container names from docker-compose.yml
+./scripts/analyze.sh captures/temporal_00001.pcap                          # all traffic
+./scripts/analyze.sh captures/temporal_00001.pcap --only grpc              # gRPC only
+./scripts/analyze.sh captures/temporal_00001.pcap --no-interservice        # hide inter-service traffic
 ```
-
-Without `pyyaml` the script falls back to a hardcoded IP → container name map and works normally.
-
-**Usage:**
-```bash
-# All protocols, all hosts
-./scripts/analyze.sh captures/temporal_00001.pcap
-
-# gRPC traffic only
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc
-
-# Multiple protocols
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc,http
-
-# Hide noisy protocols
-./scripts/analyze.sh captures/temporal_00001.pcap --exclude pgsql,tcp
-
-# Single worker only
-./scripts/analyze.sh captures/temporal_00001.pcap --only-host hello-world-worker
-
-# Hide infrastructure noise
-./scripts/analyze.sh captures/temporal_00001.pcap --exclude-host wireshark,temporal-ui
-
-# Combine protocol and host filters (AND semantics)
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc --only-host hello-world-worker
-```
-
-Named protocols: `grpc` / `http2` (port 7233), `pgsql` / `postgresql` (port 5432), `http` (port 8080), `tcp`, `arp`. Anything else is matched against tshark's Protocol column (e.g. `ICMPv6`).
-
-Host specs accept container names (e.g. `postgresql`, `hello-world-worker`) or raw IPs (e.g. `172.20.0.40`). A packet matches if the host appears as either source or destination. Protocol and host filters are ANDed when both are specified.
-
-Container name → IP mappings are read automatically from `docker-compose.yml` when `pyyaml` is installed, so any new services added to the compose file are picked up without touching the script.
-
-The flow diagram shows which containers communicated and how much traffic each connection carried. The traffic sequence diagram shows all protocol events in chronological order (gRPC arrows show the RPC method name). The gRPC sequence diagram shows every gRPC method call in order, with consecutive identical calls from the same source compressed (e.g., `PollWorkflowTaskQueue (x1,234)`).
 
 ---
 
