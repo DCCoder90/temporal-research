@@ -19,8 +19,10 @@ The first run downloads images and compiles the Go binaries — give it a few mi
 **Startup order:**
 1. tshark starts capturing on `temporal-net`
 2. PostgreSQL becomes healthy
-3. Temporal server initialises (schema, metadata, default namespace)
-4. Temporal UI becomes available
+3. `temporal-setup` creates DB schema via `temporal-sql-tool`, then exits
+4. `temporal-frontend`, `temporal-history`, `temporal-matching`, and `temporal-internal-worker` start in parallel; each registers its IP in PostgreSQL's RingPop membership table so they can discover each other
+5. `temporal-default-namespace` retries until the frontend is ready, registers the `default` namespace, then exits
+6. Temporal UI becomes available
 
 Example workflow workers and starters are **not** started automatically — see [Example workflows](#example-workflows) below.
 
@@ -66,12 +68,15 @@ To open a capture:
 
 | Filter | What it shows |
 |---|---|
-| `tcp.port == 7233` | All Temporal gRPC traffic |
+| `tcp.port == 7233` | All Temporal gRPC traffic (client ↔ frontend) |
 | `ip.src_host != "wireshark" && ip.dst_host != "wireshark" && !pgsql` | Everything except Wireshark's own traffic and PostgreSQL chatter — good starting point |
 | `tcp.port == 7233 && ip.src_host != "wireshark" && ip.dst_host != "wireshark"` | Only Temporal gRPC, no Wireshark noise |
 | `(ip.src_host == "hello-world-worker" \|\| ip.dst_host == "hello-world-worker")` | All traffic to/from the worker |
 | `(ip.src_host == "hello-world-starter" \|\| ip.dst_host == "hello-world-starter")` | All traffic to/from the starter (workflow submission) |
-| `ip.src_host == "temporal" \|\| ip.dst_host == "temporal"` | All traffic in and out of the Temporal server |
+| `ip.src_host == "temporal-frontend" \|\| ip.dst_host == "temporal-frontend"` | All traffic in and out of the frontend service |
+| `ip.src_host == "temporal-history" \|\| ip.dst_host == "temporal-history"` | All traffic in and out of the history service |
+| `ip.src_host == "temporal-matching" \|\| ip.dst_host == "temporal-matching"` | All traffic in and out of the matching service |
+| `(ip.addr == 172.20.0.21 \|\| ip.addr == 172.20.0.22 \|\| ip.addr == 172.20.0.23 \|\| ip.addr == 172.20.0.24) && !pgsql` | Inter-service gRPC traffic only (excludes DB) |
 | `tcp.port == 5432` | PostgreSQL only — useful for watching schema/persistence activity |
 | `tcp.port == 8080` | Temporal UI HTTP traffic |
 
@@ -196,7 +201,9 @@ All data is ephemeral — PostgreSQL uses a tmpfs mount and is wiped on shutdown
 
 ```
 docker-compose.yml          # All containers
-temporal-config/            # Temporal server dynamic config
+temporal-config/
+  dynamicconfig/            # Temporal server runtime config (dynamic config)
+  scripts/setup.sh          # DB schema init script (run by temporal-setup container)
 examples/
   hello-world/              # Simple hello-world workflow
   scheduled/                # Temporal Schedules (periodic trigger)

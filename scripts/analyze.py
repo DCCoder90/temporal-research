@@ -37,7 +37,10 @@ REPORTS_DIR = PROJECT_ROOT / "captures" / "reports"
 # Falls back to a hardcoded snapshot so the script works even without the dep.
 _HARDCODED_IP_TO_NAME: dict[str, str] = {
     "172.20.0.10": "postgresql",
-    "172.20.0.20": "temporal",
+    "172.20.0.21": "temporal-frontend",
+    "172.20.0.22": "temporal-history",
+    "172.20.0.23": "temporal-matching",
+    "172.20.0.24": "temporal-internal-worker",
     "172.20.0.30": "temporal-ui",
     "172.20.0.40": "hello-world-worker",
     "172.20.0.41": "hello-world-starter",
@@ -93,10 +96,20 @@ NAME_TO_IP: dict[str, str] = {v: k for k, v in IP_TO_NAME.items()}
 
 # Well-known ports → human labels
 PORT_LABELS: dict[str, str] = {
-    "7233": "Temporal gRPC",
+    "7233": "Temporal gRPC (frontend)",
+    "7234": "Temporal gRPC (history)",
+    "7235": "Temporal gRPC (matching)",
+    "7239": "Temporal gRPC (worker)",
+    "6933": "Temporal membership (frontend)",
+    "6934": "Temporal membership (history)",
+    "6935": "Temporal membership (matching)",
+    "6939": "Temporal membership (worker)",
     "5432": "PostgreSQL",
     "8080": "HTTP (Temporal UI)",
 }
+
+# All ports carrying Temporal gRPC (HTTP/2) traffic — used to decode inter-service calls.
+GRPC_PORTS: set[str] = {"7233", "7234", "7235", "7239"}
 
 # Maximum compressed rows shown in sequence diagram before truncating
 MAX_SEQ_ENTRIES = 150
@@ -107,8 +120,8 @@ MAX_SEQ_ENTRIES = 150
 _PROTO_PORTS: dict[str, set[str]] = {
     "pgsql":      {"5432"},
     "postgresql": {"5432"},
-    "grpc":       {"7233"},
-    "http2":      {"7233"},
+    "grpc":       GRPC_PORTS,
+    "http2":      GRPC_PORTS,
     "http":       {"8080"},
 }
 
@@ -289,10 +302,13 @@ def extract_grpc_calls(pcap: Path) -> list[tuple[float, str, str, str]]:
         /temporal.api.workflowservice.v1.WorkflowService/PollWorkflowTaskQueue
     """
     fields = ["frame.time_epoch", "ip.src", "ip.dst", "http2.headers.path"]
+    # Decode HTTP/2 on all Temporal gRPC ports so inter-service calls
+    # (frontend↔history on :7234, frontend↔matching on :7235, etc.) are captured.
+    decode_args = [arg for port in sorted(GRPC_PORTS) for arg in ("-d", f"tcp.port=={port},http2")]
     rows = _run_tshark(
         pcap,
         fields,
-        extra_args=["-d", "tcp.port==7233,http2"],
+        extra_args=decode_args,
         filter_expr="http2.headers.path",
     )
 
@@ -360,7 +376,7 @@ def build_traffic_sequence_diagram(
     events: list[tuple[float, str, str, str]] = []
 
     for p in packets:
-        if p["dport"] == "7233" or p["sport"] == "7233":
+        if p["dport"] in GRPC_PORTS or p["sport"] in GRPC_PORTS:
             continue  # replaced by grpc_calls entries below
         src = resolve(p["src"])
         dst = resolve(p["dst"])
@@ -377,7 +393,8 @@ def build_traffic_sequence_diagram(
     if not events:
         return (
             "sequenceDiagram\n"
-            "    Note over temporal: No traffic decoded in this capture"
+            "    participant tf as temporal-frontend\n"
+            "    Note over tf: No traffic decoded in this capture"
         )
 
     seen: dict[str, None] = {}
@@ -406,7 +423,7 @@ def build_traffic_sequence_diagram(
     if total > MAX_SEQ_ENTRIES:
         omitted = total - MAX_SEQ_ENTRIES
         lines.append(
-            f"    Note over temporal: ... {fmt_num(omitted)} more event type(s) not shown (cap: {MAX_SEQ_ENTRIES})"
+            f"    Note over {mermaid_id(list(seen.keys())[0])}: ... {fmt_num(omitted)} more event type(s) not shown (cap: {MAX_SEQ_ENTRIES})"
         )
 
     return "\n".join(lines)
@@ -415,10 +432,12 @@ def build_traffic_sequence_diagram(
 def build_sequence_diagram(calls: list[tuple[float, str, str, str]]) -> str:
     """Mermaid sequenceDiagram with consecutive identical calls compressed."""
     if not calls:
+        ports = ", ".join(f"tcp.port=={p},http2" for p in sorted(GRPC_PORTS))
         return (
             "sequenceDiagram\n"
-            "    Note over temporal: No gRPC calls decoded in this capture\n"
-            "    Note over temporal: Run tshark -r file.pcap -d tcp.port==7233,http2 -Y http2.headers.path"
+            "    participant tf as temporal-frontend\n"
+            "    Note over tf: No gRPC calls decoded in this capture\n"
+            f"    Note over tf: Run tshark -r file.pcap {' '.join(f'-d {p}' for p in ports.split(', '))} -Y http2.headers.path"
         )
 
     # Collect participants in first-appearance order.
@@ -449,7 +468,7 @@ def build_sequence_diagram(calls: list[tuple[float, str, str, str]]) -> str:
     if total > MAX_SEQ_ENTRIES:
         omitted = total - MAX_SEQ_ENTRIES
         lines.append(
-            f"    Note over temporal: ... {fmt_num(omitted)} more call type(s) not shown (cap: {MAX_SEQ_ENTRIES})"
+            f"    Note over {mermaid_id(list(seen.keys())[0])}: ... {fmt_num(omitted)} more call type(s) not shown (cap: {MAX_SEQ_ENTRIES})"
         )
 
     return "\n".join(lines)
@@ -753,11 +772,11 @@ def generate_stats(
             "> **No gRPC calls were decoded.** This can happen when tshark's HTTP/2 dissector\n"
             "> did not recognise traffic on port 7233.  Verify with:\n"
             "> ```\n"
-            "> tshark -r <file> -d tcp.port==7233,http2 -Y http2.headers.path\n"
+            f"> tshark -r <file> {' '.join(f'-d tcp.port=={p},http2' for p in sorted(GRPC_PORTS))} -Y http2.headers.path\n"
             "> ```"
         )
     else:
-        out.append("_All methods called on port 7233 (Temporal Frontend), decoded from HTTP/2 HEADERS._")
+        out.append(f"_All methods decoded from HTTP/2 HEADERS on Temporal gRPC ports ({', '.join(sorted(GRPC_PORTS, key=int))})._")
         out.append("")
 
         method_data: dict[str, dict] = defaultdict(lambda: {"count": 0, "sources": set()})
@@ -891,7 +910,7 @@ Protocol names (case-insensitive):
   <other>         Matched against tshark's Protocol column (e.g. ICMPv6, DNS)
 
 Host specs (--only-host / --exclude-host):
-  Container names (e.g. postgresql, temporal, hello-world-worker) or raw IPs.
+  Container names (e.g. postgresql, temporal-frontend, hello-world-worker) or raw IPs.
   Matches any packet where the host is the source OR destination.
   Host and protocol filters are ANDed when both are specified.
 

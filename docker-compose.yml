@@ -6,7 +6,10 @@ version: "3.9"
 #
 # Static IP map:
 #   172.20.0.10  postgresql
-#   172.20.0.20  temporal          (all Temporal services in one process)
+#   172.20.0.21  temporal-frontend         (external gRPC :7233, membership :6933)
+#   172.20.0.22  temporal-history          (gRPC :7234, membership :6934)
+#   172.20.0.23  temporal-matching         (gRPC :7235, membership :6935)
+#   172.20.0.24  temporal-internal-worker  (gRPC :7239, membership :6939)
 #   172.20.0.30  temporal-ui
 #   172.20.0.40  hello-world-worker
 #   172.20.0.41  hello-world-starter
@@ -33,12 +36,15 @@ version: "3.9"
 #   docker compose run --rm <starter>     (also starts the worker as a dependency)
 #   docker compose up <worker>            (keep a worker running in the background)
 #
-# NOTE on single Temporal container: Temporal v1.29+ performs a non-idempotent
-# cluster metadata INSERT on every process startup. Running each service in its
-# own container causes a fatal duplicate-key race on the `cluster_metadata_info`
-# table. The officially supported Docker Compose topology is one process running
-# all services via `temporalio/auto-setup`, which initialises the schema,
-# cluster metadata, and default namespace before the server starts.
+# Startup sequence:
+#   1. temporal-setup              — runs temporal-sql-tool, creates DB schema, exits 0
+#   2. temporal-frontend/history/matching/internal-worker
+#                                  — start in parallel once setup completes;
+#                                    each registers its IP in the RingPop membership
+#                                    table (via TEMPORAL_BROADCAST_ADDRESS) so the
+#                                    services can discover each other through PostgreSQL
+#   3. temporal-default-namespace  — retries until temporal-frontend accepts connections,
+#                                    registers the "default" namespace, exits 0
 networks:
   temporal-network:
     driver: bridge
@@ -73,34 +79,150 @@ services:
       retries: 10
     restart: on-failure
 
-  # ── Temporal server (all services) ──────────────────────────────────────────
-  # temporalio/auto-setup handles, in order:
-  #   1. DB schema creation and versioned migrations
-  #   2. Cluster metadata initialisation (single INSERT, idempotent on retry)
-  #   3. Default namespace creation
-  #   4. Starting frontend + history + matching + worker in one process
-  #
-  # Splitting these into four separate containers causes a fatal duplicate-key
-  # race on cluster_metadata_info — see network comment above.
-  temporal:
-    image: temporalio/auto-setup:latest
-    container_name: temporal
+  # ── Temporal schema init ─────────────────────────────────────────────────────
+  # Uses temporalio/admin-tools (has temporal-sql-tool) to create and migrate
+  # the temporal and temporal_visibility databases. Exits 0 when done.
+  # The four Temporal service containers depend on this with service_completed_successfully,
+  # which avoids the duplicate-key race on cluster_metadata_info that occurs when
+  # multiple temporalio/auto-setup containers run schema setup concurrently.
+  temporal-setup:
+    image: temporalio/admin-tools:latest
+    container_name: temporal-setup
     networks:
-      temporal-network:
-        ipv4_address: 172.20.0.20
+      - temporal-network
     depends_on:
       postgresql:
         condition: service_healthy
+    environment:
+      - DB_PORT=5432
+      - POSTGRES_SEEDS=postgresql
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+    volumes:
+      - ./temporal-config/scripts:/scripts
+    command: ["/bin/sh", "/scripts/setup.sh"]
+    restart: on-failure
+
+  # ── Temporal: frontend ────────────────────────────────────────────────────────
+  # External-facing service on :7233. Handles all client gRPC requests (start
+  # workflow, signal, query, etc.) and routes them internally to history/matching.
+  temporal-frontend:
+    image: temporalio/server:latest
+    container_name: temporal-frontend
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.21
+    depends_on:
+      temporal-setup:
+        condition: service_completed_successfully
     environment:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_SEEDS=postgresql
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
+      - SERVICES=frontend
+      - TEMPORAL_BROADCAST_ADDRESS=172.20.0.21
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
-      - TEMPORAL_BROADCAST_ADDRESS=172.20.0.20
     volumes:
       - ./temporal-config/dynamicconfig:/etc/temporal/config/dynamicconfig
+    restart: on-failure
+
+  # ── Temporal: history ─────────────────────────────────────────────────────────
+  # Manages per-workflow mutable state and schedules timers/retries on :7234.
+  # Receives tasks from frontend via the RingPop membership ring.
+  temporal-history:
+    image: temporalio/server:latest
+    container_name: temporal-history
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.22
+    depends_on:
+      temporal-setup:
+        condition: service_completed_successfully
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_SEEDS=postgresql
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - SERVICES=history
+      - TEMPORAL_BROADCAST_ADDRESS=172.20.0.22
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
+    volumes:
+      - ./temporal-config/dynamicconfig:/etc/temporal/config/dynamicconfig
+    restart: on-failure
+
+  # ── Temporal: matching ────────────────────────────────────────────────────────
+  # Manages task queues and dispatches activity/workflow tasks to SDK workers on :7235.
+  temporal-matching:
+    image: temporalio/server:latest
+    container_name: temporal-matching
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.23
+    depends_on:
+      temporal-setup:
+        condition: service_completed_successfully
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_SEEDS=postgresql
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - SERVICES=matching
+      - TEMPORAL_BROADCAST_ADDRESS=172.20.0.23
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
+    volumes:
+      - ./temporal-config/dynamicconfig:/etc/temporal/config/dynamicconfig
+    restart: on-failure
+
+  # ── Temporal: internal worker ─────────────────────────────────────────────────
+  # Executes system workflows (archival, namespace replication, etc.) on :7239.
+  # PUBLIC_FRONTEND_ADDRESS tells it where to send RPC calls.
+  temporal-internal-worker:
+    image: temporalio/server:latest
+    container_name: temporal-internal-worker
+    networks:
+      temporal-network:
+        ipv4_address: 172.20.0.24
+    depends_on:
+      temporal-setup:
+        condition: service_completed_successfully
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_SEEDS=postgresql
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - SERVICES=worker
+      - TEMPORAL_BROADCAST_ADDRESS=172.20.0.24
+      - PUBLIC_FRONTEND_ADDRESS=temporal-frontend:7233
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
+    volumes:
+      - ./temporal-config/dynamicconfig:/etc/temporal/config/dynamicconfig
+    restart: on-failure
+
+  # ── Default namespace registration ───────────────────────────────────────────
+  # Retries until temporal-frontend is accepting connections, then creates the
+  # "default" namespace and exits. Uses restart: on-failure to handle the startup
+  # window before the frontend is ready.
+  temporal-default-namespace:
+    image: temporalio/admin-tools:latest
+    container_name: temporal-default-namespace
+    networks:
+      - temporal-network
+    depends_on:
+      - temporal-frontend
+    command: >
+      /bin/sh -c "
+        until temporal --address temporal-frontend:7233 operator namespace describe default 2>/dev/null ||
+              temporal --address temporal-frontend:7233 operator namespace create --retention 1d default 2>/dev/null; do
+          echo 'Waiting for temporal-frontend...';
+          sleep 3;
+        done;
+        echo 'Default namespace ready.'
+      "
     restart: on-failure
 
   # ── Temporal web UI ──────────────────────────────────────────────────────────
@@ -113,10 +235,10 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:8080
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
 
   # ── Hello-world worker ───────────────────────────────────────────────────────
@@ -129,9 +251,9 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.40
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
     profiles: [manual]
 
@@ -145,7 +267,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.41
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       hello-world-worker:
         condition: service_started
@@ -162,9 +284,9 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.42
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
     profiles: [manual]
 
@@ -178,9 +300,9 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.43
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
     profiles: [manual]
 
@@ -194,9 +316,9 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.44
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
     profiles: [manual]
 
@@ -210,9 +332,9 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.45
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
     profiles: [manual]
 
@@ -226,9 +348,9 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.46
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
-      - temporal
+      - temporal-frontend
     restart: on-failure
     profiles: [manual]
 
@@ -245,7 +367,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.51
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       - scheduled-worker
     profiles: [manual]
@@ -259,7 +381,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.52
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       - signals-worker
     profiles: [manual]
@@ -273,7 +395,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.53
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
       - WORKFLOW_ID=approval-workflow
     depends_on:
       - signals-worker
@@ -288,7 +410,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.54
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
       - WORKFLOW_ID=approval-workflow
     depends_on:
       - signals-worker
@@ -303,7 +425,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.55
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       - child-workflows-worker
     profiles: [manual]
@@ -317,7 +439,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.56
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       - retries-worker
     profiles: [manual]
@@ -331,7 +453,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.57
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       - saga-worker
     profiles: [manual]
@@ -345,7 +467,7 @@ services:
       temporal-network:
         ipv4_address: 172.20.0.58
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal-frontend:7233
     depends_on:
       - saga-worker
     profiles: [manual]
@@ -391,4 +513,3 @@ services:
       - ./wireshark:/config/.config/wireshark
       - ./captures:/captures:ro
     restart: unless-stopped
-
