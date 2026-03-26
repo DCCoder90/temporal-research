@@ -4,6 +4,9 @@ A local Temporal cluster running as individual Docker containers, with a Go "hel
 
 > Vibe-coded with [Claude Code](https://github.com/anthropics/claude-code).
 
+> [!WARNING]
+> This is a personal side project and may undergo breaking changes at any time without notice. If you are relying on it for anything, use a [tagged release](https://github.com/DCCoder90/temporal-research/releases) rather than tracking `main`.
+
 ## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Windows) or Docker + Docker Compose (Linux)
@@ -19,8 +22,10 @@ The first run downloads images and compiles the Go binaries — give it a few mi
 **Startup order:**
 1. tshark starts capturing on `temporal-net`
 2. PostgreSQL becomes healthy
-3. Temporal server initialises (schema, metadata, default namespace)
-4. Temporal UI becomes available
+3. `temporal-setup` creates DB schema via `temporal-sql-tool`, then exits
+4. `temporal-frontend`, `temporal-history`, `temporal-matching`, and `temporal-internal-worker` start in parallel; each registers its IP in PostgreSQL's RingPop membership table so they can discover each other
+5. `temporal-default-namespace` retries until the frontend is ready, registers the `default` namespace, then exits
+6. Temporal UI becomes available
 
 Example workflow workers and starters are **not** started automatically — see [Example workflows](#example-workflows) below.
 
@@ -66,66 +71,29 @@ To open a capture:
 
 | Filter | What it shows |
 |---|---|
-| `tcp.port == 7233` | All Temporal gRPC traffic |
+| `tcp.port == 7233` | All Temporal gRPC traffic (client ↔ frontend) |
 | `ip.src_host != "wireshark" && ip.dst_host != "wireshark" && !pgsql` | Everything except Wireshark's own traffic and PostgreSQL chatter — good starting point |
 | `tcp.port == 7233 && ip.src_host != "wireshark" && ip.dst_host != "wireshark"` | Only Temporal gRPC, no Wireshark noise |
 | `(ip.src_host == "hello-world-worker" \|\| ip.dst_host == "hello-world-worker")` | All traffic to/from the worker |
 | `(ip.src_host == "hello-world-starter" \|\| ip.dst_host == "hello-world-starter")` | All traffic to/from the starter (workflow submission) |
-| `ip.src_host == "temporal" \|\| ip.dst_host == "temporal"` | All traffic in and out of the Temporal server |
+| `ip.src_host == "temporal-frontend" \|\| ip.dst_host == "temporal-frontend"` | All traffic in and out of the frontend service |
+| `ip.src_host == "temporal-history" \|\| ip.dst_host == "temporal-history"` | All traffic in and out of the history service |
+| `ip.src_host == "temporal-matching" \|\| ip.dst_host == "temporal-matching"` | All traffic in and out of the matching service |
+| `(ip.addr == 172.20.0.21 \|\| ip.addr == 172.20.0.22 \|\| ip.addr == 172.20.0.23 \|\| ip.addr == 172.20.0.24) && !pgsql` | Inter-service gRPC traffic only (excludes DB) |
 | `tcp.port == 5432` | PostgreSQL only — useful for watching schema/persistence activity |
 | `tcp.port == 8080` | Temporal UI HTTP traffic |
 
 
 ## Analyzing captures
 
-`scripts/analyze.sh` reads a pcap file and writes two output files to `captures/reports/`:
+See **[scripts/ANALYZE.md](scripts/ANALYZE.md)** for full usage, all flags, and output descriptions.
 
-| Output file | Contents |
-|---|---|
-| `<name>_flow.html` | Data-flow diagram, all-protocol traffic sequence diagram, and gRPC sequence diagram (open in any browser) |
-| `<name>_stats.md` | Protocol breakdown, connection matrix, gRPC method call counts, Temporal-specific insights |
-
-All diagrams support zoom (scroll or buttons) and pan (drag).
-
-**Prerequisites** (one-time):
+Quick start:
 ```bash
-brew install wireshark   # provides tshark
-pip install pyyaml       # optional — enables auto-loading container names from docker-compose.yml
+./scripts/analyze.sh captures/temporal_00001.pcap                          # all traffic
+./scripts/analyze.sh captures/temporal_00001.pcap --only grpc              # gRPC only
+./scripts/analyze.sh captures/temporal_00001.pcap --no-interservice        # hide inter-service traffic
 ```
-
-Without `pyyaml` the script falls back to a hardcoded IP → container name map and works normally.
-
-**Usage:**
-```bash
-# All protocols, all hosts
-./scripts/analyze.sh captures/temporal_00001.pcap
-
-# gRPC traffic only
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc
-
-# Multiple protocols
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc,http
-
-# Hide noisy protocols
-./scripts/analyze.sh captures/temporal_00001.pcap --exclude pgsql,tcp
-
-# Single worker only
-./scripts/analyze.sh captures/temporal_00001.pcap --only-host hello-world-worker
-
-# Hide infrastructure noise
-./scripts/analyze.sh captures/temporal_00001.pcap --exclude-host wireshark,temporal-ui
-
-# Combine protocol and host filters (AND semantics)
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc --only-host hello-world-worker
-```
-
-Named protocols: `grpc` / `http2` (port 7233), `pgsql` / `postgresql` (port 5432), `http` (port 8080), `tcp`, `arp`. Anything else is matched against tshark's Protocol column (e.g. `ICMPv6`).
-
-Host specs accept container names (e.g. `postgresql`, `hello-world-worker`) or raw IPs (e.g. `172.20.0.40`). A packet matches if the host appears as either source or destination. Protocol and host filters are ANDed when both are specified.
-
-Container name → IP mappings are read automatically from `docker-compose.yml` when `pyyaml` is installed, so any new services added to the compose file are picked up without touching the script.
-
-The flow diagram shows which containers communicated and how much traffic each connection carried. The traffic sequence diagram shows all protocol events in chronological order (gRPC arrows show the RPC method name). The gRPC sequence diagram shows every gRPC method call in order, with consecutive identical calls from the same source compressed (e.g., `PollWorkflowTaskQueue (x1,234)`).
 
 ---
 
@@ -196,7 +164,9 @@ All data is ephemeral — PostgreSQL uses a tmpfs mount and is wiped on shutdown
 
 ```
 docker-compose.yml          # All containers
-temporal-config/            # Temporal server dynamic config
+temporal-config/
+  dynamicconfig/            # Temporal server runtime config (dynamic config)
+  scripts/setup.sh          # DB schema init script (run by temporal-setup container)
 examples/
   hello-world/              # Simple hello-world workflow
   scheduled/                # Temporal Schedules (periodic trigger)

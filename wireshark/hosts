@@ -2,7 +2,10 @@
 # Enable: View → Name Resolution → Resolve Network Addresses
 
 172.20.0.10  postgresql
-172.20.0.20  temporal
+172.20.0.21  temporal-frontend
+172.20.0.22  temporal-history
+172.20.0.23  temporal-matching
+172.20.0.24  temporal-internal-worker
 172.20.0.30  temporal-ui
 172.20.0.40  hello-world-worker
 172.20.0.41  hello-world-starter
