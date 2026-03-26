@@ -4,6 +4,9 @@ A local Temporal cluster running as individual Docker containers, with a Go "hel
 
 > Vibe-coded with [Claude Code](https://github.com/anthropics/claude-code).
 
+> [!WARNING]
+> This is a personal side project and may undergo breaking changes at any time without notice. If you are relying on it for anything, use a [tagged release](../../releases) rather than tracking `main`.
+
 ## Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Windows) or Docker + Docker Compose (Linux)
