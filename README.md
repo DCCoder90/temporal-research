@@ -86,10 +86,6 @@ To open a capture:
 
 ## Analyzing captures
 
-Two analysis tools are available:
-
-### temporal-analyze (GUI + CLI)
-
 **[tools/temporal-analyze/](tools/temporal-analyze/README.md)** — a native desktop GUI and headless CLI that produces interactive Mermaid diagrams, a statistics report, and a SQL query engine over the packet data.
 
 ```bash
@@ -101,17 +97,7 @@ go build -tags nogui -o temporal-analyze .
 ./temporal-analyze captures/temporal_00001.pcap --json --quiet | jq '.grpc_calls | map(.method) | unique'
 ```
 
-> See **[tools/temporal-analyze/README.md](tools/temporal-analyze/README.md)** for build instructions and all flags.
-
-### analyze.sh (Python script)
-
-See **[scripts/ANALYZE.md](scripts/ANALYZE.md)** for full usage, all flags, and output descriptions.
-
-```bash
-./scripts/analyze.sh captures/temporal_00001.pcap                          # all traffic
-./scripts/analyze.sh captures/temporal_00001.pcap --only grpc              # gRPC only
-./scripts/analyze.sh captures/temporal_00001.pcap --no-interservice        # hide inter-service traffic
-```
+> See **[tools/temporal-analyze/README.md](tools/temporal-analyze/README.md)** for installation, build instructions, and all flags.
 
 ---
 
@@ -200,7 +186,6 @@ tshark/Dockerfile           # Minimal tshark capture image
 captures/                   # Rolling pcap files written by tshark
   reports/                  # Generated reports (gitignored)
 wireshark/hosts             # Static IP → container name mappings
-scripts/
-  analyze.sh                # Entry point — checks deps, calls analyze.py
-  analyze.py                # Extracts packets + gRPC calls, generates HTML + Markdown
+tools/
+  temporal-analyze/         # Capture analysis tool (GUI + CLI)
 ```
