@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Temporal Analyze</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.css">
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5/mode/sql/sql.js"></script>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+
+  <aside id="sidebar">
+    <div id="logo">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">Temporal Analyze</span>
+    </div>
+
+    <!-- File picker -->
+    <div id="file-zone" class="drop-zone" title="Click to select or drag a .pcap file">
+      <div id="file-zone-icon">📂</div>
+      <div id="file-zone-label">Drop .pcap file here<br><span class="hint-text">or click to browse</span></div>
+      <div id="file-zone-name" class="file-selected" hidden></div>
+    </div>
+
+    <!-- Filter panel -->
+    <div id="filter-panel">
+      <div class="filter-section-title">Protocol Filter</div>
+
+      <div class="radio-row">
+        <label><input type="radio" name="proto-mode" value="all" checked> All protocols</label>
+        <label><input type="radio" name="proto-mode" value="only"> Only</label>
+        <label><input type="radio" name="proto-mode" value="exclude"> Exclude</label>
+      </div>
+      <input type="text" id="proto-value" class="filter-input" placeholder="grpc, pgsql, http ..." disabled>
+
+      <div class="filter-section-title" style="margin-top:1.25rem">Host Filter</div>
+
+      <div class="radio-row">
+        <label><input type="radio" name="host-mode" value="all" checked> All hosts</label>
+        <label><input type="radio" name="host-mode" value="only-host"> Only</label>
+        <label><input type="radio" name="host-mode" value="exclude-host"> Exclude</label>
+      </div>
+      <input type="text" id="host-value" class="filter-input" placeholder="temporal-frontend, hello-world-worker ..." disabled>
+
+      <label class="checkbox-row" style="margin-top:1rem">
+        <input type="checkbox" id="no-interservice">
+        Hide internal services
+        <span class="hint-text">(history, matching, internal-worker)</span>
+      </label>
+    </div>
+
+    <!-- View toggle -->
+    <div id="view-toggle">
+      <div class="filter-section-title">View</div>
+      <div class="tab-row">
+        <button id="tab-diagrams" class="tab-btn active">Diagrams</button>
+        <button id="tab-stats" class="tab-btn">Statistics</button>
+        <button id="tab-query" class="tab-btn">Query</button>
+      </div>
+    </div>
+
+    <div id="action-row">
+      <button id="analyze-btn" class="btn-primary" disabled>Analyze</button>
+      <button id="export-btn" class="btn-secondary" disabled>Export</button>
+    </div>
+
+    <div id="status-bar"></div>
+  </aside>
+
+  <main id="results">
+    <div id="empty-state">
+      <div class="empty-icon">📡</div>
+      <div class="empty-title">Select a capture file</div>
+      <div class="empty-hint">Drop a .pcap file into the sidebar or click the file zone to begin analysis.</div>
+    </div>
+
+    <!-- Metadata bar — shown after analysis -->
+    <div id="meta-bar" hidden>
+      <span id="meta-file"></span>
+      <span id="meta-duration"></span>
+      <span id="meta-packets"></span>
+      <span id="meta-bytes"></span>
+      <span id="meta-grpc"></span>
+      <span id="meta-filter" class="filter-badge" hidden></span>
+    </div>
+
+    <!-- ── Diagrams view ─────────────────────────────────────────────────── -->
+    <div id="view-diagrams">
+
+      <!-- Data Flow diagram -->
+      <div class="section-header" id="section-flow" hidden>
+        <h2>Data Flow Diagram</h2>
+        <p class="section-hint">Each arrow shows protocol, total packet count, and bytes transferred in that direction.</p>
+      </div>
+      <div class="diagram-card" id="card-flow" hidden>
+        <div class="card-toolbar">
+          <span class="card-title">Data Flow</span>
+          <button class="btn-zoom" onclick="zoomIn(0)">&#xFF0B;</button>
+          <button class="btn-zoom" onclick="zoomOut(0)">&#xFF0D;</button>
+          <button class="btn-zoom" onclick="resetZoom(0)">&#x27F3;</button>
+          <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+        </div>
+        <div class="diagram-wrap">
+          <div class="mermaid" id="mermaid-flow"></div>
+        </div>
+      </div>
+
+      <!-- Traffic Sequence diagram -->
+      <div class="section-header" id="section-traffic" hidden>
+        <h2>Traffic Sequence Diagram</h2>
+        <p class="section-hint">All protocol traffic in chronological order. gRPC arrows show the RPC method name. Consecutive identical events are compressed (xN).</p>
+      </div>
+      <div class="diagram-card" id="card-traffic" hidden>
+        <div class="card-toolbar">
+          <span class="card-title">Traffic Sequence</span>
+          <button class="btn-zoom" onclick="zoomIn(1)">&#xFF0B;</button>
+          <button class="btn-zoom" onclick="zoomOut(1)">&#xFF0D;</button>
+          <button class="btn-zoom" onclick="resetZoom(1)">&#x27F3;</button>
+          <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+        </div>
+        <div class="diagram-wrap">
+          <div class="mermaid" id="mermaid-traffic"></div>
+        </div>
+      </div>
+
+      <!-- gRPC Sequence diagram -->
+      <div class="section-header" id="section-grpc" hidden>
+        <h2>gRPC Sequence Diagram</h2>
+        <p class="section-hint">Consecutive identical calls from the same source are compressed (xN). Sequence numbers show call order.</p>
+      </div>
+      <div class="diagram-card" id="card-grpc" hidden>
+        <div class="card-toolbar">
+          <span class="card-title">gRPC Sequence</span>
+          <button class="btn-zoom" onclick="zoomIn(2)">&#xFF0B;</button>
+          <button class="btn-zoom" onclick="zoomOut(2)">&#xFF0D;</button>
+          <button class="btn-zoom" onclick="resetZoom(2)">&#x27F3;</button>
+          <span id="grpc-page-nav" hidden>
+            <button class="btn-zoom" id="grpc-prev-btn" onclick="grpcChangePage(-1)" disabled>&#8249;</button>
+            <span id="grpc-page-label" class="zoom-hint" style="margin:0 .15rem"></span>
+            <button class="btn-zoom" id="grpc-next-btn" onclick="grpcChangePage(1)">&#8250;</button>
+          </span>
+          <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+        </div>
+        <div class="diagram-wrap">
+          <div class="mermaid" id="mermaid-grpc"></div>
+        </div>
+      </div>
+
+    </div><!-- /view-diagrams -->
+
+    <!-- ── Statistics view ───────────────────────────────────────────────── -->
+    <div id="view-stats" hidden>
+      <div id="stats-content" class="stats-body"></div>
+    </div>
+
+    <!-- ── Query view ──────────────────────────────────────────────────── -->
+    <div id="view-query" hidden>
+      <div id="query-toolbar">
+        <select id="query-samples" class="filter-input query-samples-select">
+          <option value="">— sample queries —</option>
+        </select>
+        <button id="query-run-btn" class="btn-primary query-run-btn">Run</button>
+        <button id="query-export-btn" class="query-export-btn" disabled>Export CSV</button>
+        <button id="query-help-btn" class="query-help-btn" title="Query help">?</button>
+        <span id="query-status" class="query-status"></span>
+      </div>
+      <div id="query-editor-wrap">
+        <textarea id="query-editor"></textarea>
+      </div>
+      <div id="query-error" class="error-card" hidden></div>
+      <div id="query-results-wrap" hidden>
+        <div id="query-results-meta"></div>
+        <div id="query-table-scroll">
+          <table id="query-results-table"></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="error-card" class="error-card" hidden>
+      <strong>Analysis failed:</strong> <span id="error-msg"></span>
+    </div>
+  </main>
+
+  <!-- ── Query help modal ───────────────────────────────────────────── -->
+  <div id="query-help-backdrop" hidden>
+    <div id="query-help-modal" role="dialog" aria-modal="true" aria-label="Query Help">
+      <div id="query-help-header">
+        <span>Query Reference</span>
+        <button id="query-help-close" aria-label="Close">&times;</button>
+      </div>
+      <div id="query-help-body">
+        <h3>Tables</h3>
+        <table class="help-table">
+          <thead><tr><th>Table</th><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="14"><code>packets</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
+            <tr><td><code>src_ip</code></td><td>TEXT</td><td>Source IP address</td></tr>
+            <tr><td><code>dst_ip</code></td><td>TEXT</td><td>Destination IP address</td></tr>
+            <tr><td><code>src</code></td><td>TEXT</td><td>Source container name</td></tr>
+            <tr><td><code>dst</code></td><td>TEXT</td><td>Destination container name</td></tr>
+            <tr><td><code>src_port</code></td><td>TEXT</td><td>Source TCP port</td></tr>
+            <tr><td><code>dst_port</code></td><td>TEXT</td><td>Destination TCP port</td></tr>
+            <tr><td><code>protocol</code></td><td>TEXT</td><td>Protocol (TCP, HTTP2, PGSQL…)</td></tr>
+            <tr><td><code>bytes</code></td><td>INTEGER</td><td>Total frame size in bytes</td></tr>
+            <tr><td><code>tcp_stream</code></td><td>INTEGER</td><td>TCP stream index (-1 if not TCP)</td></tr>
+            <tr><td><code>tcp_len</code></td><td>INTEGER</td><td>TCP payload bytes (0 if not TCP)</td></tr>
+            <tr><td><code>tcp_flags</code></td><td>INTEGER</td><td>TCP flags as integer — use bitwise &amp; (e.g. <code>tcp_flags &amp; 2</code> = SYN)</td></tr>
+            <tr><td><code>retransmit</code></td><td>INTEGER</td><td>1 if tshark detected a retransmission, 0 otherwise</td></tr>
+            <tr><td><code>rtt</code></td><td>REAL</td><td>TCP ACK round-trip time in seconds (0 if unavailable)</td></tr>
+            <tr><td rowspan="9"><code>grpc_calls</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
+            <tr><td><code>src</code></td><td>TEXT</td><td>Calling service name</td></tr>
+            <tr><td><code>dst</code></td><td>TEXT</td><td>Target service name</td></tr>
+            <tr><td><code>full_path</code></td><td>TEXT</td><td>Full gRPC :path e.g. <code>/pkg.Service/Method</code></td></tr>
+            <tr><td><code>service</code></td><td>TEXT</td><td>Service name portion of the path</td></tr>
+            <tr><td><code>method</code></td><td>TEXT</td><td>gRPC method name</td></tr>
+            <tr><td><code>tcp_stream</code></td><td>INTEGER</td><td>TCP stream index (links to packets table)</td></tr>
+            <tr><td><code>stream_id</code></td><td>INTEGER</td><td>HTTP/2 stream ID within the TCP connection</td></tr>
+            <tr><td><code>status_code</code></td><td>INTEGER</td><td>gRPC status code (0=OK, non-zero=error, -1=unknown)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Syntax examples</h3>
+        <pre><code>-- Aggregate
+SELECT protocol, COUNT(*) AS n, SUM(bytes) AS total
+FROM packets
+GROUP BY protocol
+ORDER BY total DESC;
+
+-- Filter
+SELECT * FROM grpc_calls
+WHERE src = 'hello-world-worker'
+  AND method LIKE '%Workflow%';
+
+-- Join tables
+SELECT p.time, p.src, g.method
+FROM packets p
+JOIN grpc_calls g ON p.src = g.src
+  AND ABS(p.time - g.time) &lt; 0.01
+LIMIT 50;</code></pre>
+
+        <p class="help-hint">Full SQLite SQL is supported — <code>WHERE</code>, <code>GROUP BY</code>, <code>HAVING</code>, <code>ORDER BY</code>, <code>JOIN</code>, <code>LIMIT</code>, window functions, and all built-in functions. Ctrl+Enter runs the query.</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
