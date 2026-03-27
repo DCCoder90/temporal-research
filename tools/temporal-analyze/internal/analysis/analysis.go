@@ -24,15 +24,16 @@ type Options struct {
 
 // Result holds the complete analysis output.
 type Result struct {
-	PcapName    string
-	Duration    float64
-	TotalBytes  int
-	PacketCount int
-	GRPCCount   int
-	FilterDesc  string
-	FlowDiagram string
-	SeqDiagram  string
-	TrafficSeq  *string // nil when suppressed (grpc-only filter)
+	PcapName      string
+	Duration      float64
+	TotalBytes    int
+	PacketCount   int
+	GRPCCount     int
+	FilterDesc    string
+	FlowDiagram   string
+	SeqDiagram    string
+	TrafficSeq    *string // nil when suppressed (grpc-only filter)
+	StatsMarkdown string  // same content written to _stats.md by the CLI
 	// Full slices retained for export.
 	packets   []tshark.Packet
 	grpcCalls []tshark.GRPCCall
@@ -93,18 +94,21 @@ func Run(pcapPath string, opts Options) (*Result, error) {
 		trafficSeq = &ts
 	}
 
+	statsMarkdown := report.GenerateStats(filepath.Base(pcapPath), packets, grpcCalls, duration, filterDesc)
+
 	return &Result{
-		PcapName:    filepath.Base(pcapPath),
-		Duration:    duration,
-		TotalBytes:  totalBytes,
-		PacketCount: len(packets),
-		GRPCCount:   len(grpcCalls),
-		FilterDesc:  filterDesc,
-		FlowDiagram: flowDiagram,
-		SeqDiagram:  seqDiagram,
-		TrafficSeq:  trafficSeq,
-		packets:     packets,
-		grpcCalls:   grpcCalls,
+		PcapName:      filepath.Base(pcapPath),
+		Duration:      duration,
+		TotalBytes:    totalBytes,
+		PacketCount:   len(packets),
+		GRPCCount:     len(grpcCalls),
+		FilterDesc:    filterDesc,
+		FlowDiagram:   flowDiagram,
+		SeqDiagram:    seqDiagram,
+		TrafficSeq:    trafficSeq,
+		StatsMarkdown: statsMarkdown,
+		packets:       packets,
+		grpcCalls:     grpcCalls,
 	}, nil
 }
 
@@ -137,7 +141,7 @@ func WriteResult(pcapPath string, result *Result) ([]string, error) {
 		TrafficSeq:  result.TrafficSeq,
 		FilterDesc:  result.FilterDesc,
 	})
-	statsContent := report.GenerateStats(result.PcapName, result.packets, result.grpcCalls, result.Duration, result.FilterDesc)
+	statsContent := result.StatsMarkdown
 
 	if err := os.WriteFile(htmlPath, []byte(htmlContent), 0644); err != nil {
 		return nil, fmt.Errorf("writing HTML: %w", err)

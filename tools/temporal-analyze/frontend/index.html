@@ -6,6 +6,7 @@
   <title>Temporal Analyze</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
@@ -50,6 +51,15 @@
       </label>
     </div>
 
+    <!-- View toggle -->
+    <div id="view-toggle">
+      <div class="filter-section-title">View</div>
+      <div class="tab-row">
+        <button id="tab-diagrams" class="tab-btn active">Diagrams</button>
+        <button id="tab-stats" class="tab-btn">Statistics</button>
+      </div>
+    </div>
+
     <div id="action-row">
       <button id="analyze-btn" class="btn-primary" disabled>Analyze</button>
       <button id="export-btn" class="btn-secondary" disabled>Export</button>
@@ -75,58 +85,68 @@
       <span id="meta-filter" class="filter-badge" hidden></span>
     </div>
 
-    <!-- Data Flow diagram -->
-    <div class="section-header" id="section-flow" hidden>
-      <h2>Data Flow Diagram</h2>
-      <p class="section-hint">Each arrow shows protocol, total packet count, and bytes transferred in that direction.</p>
-    </div>
-    <div class="diagram-card" id="card-flow" hidden>
-      <div class="card-toolbar">
-        <span class="card-title">Data Flow</span>
-        <button class="btn-zoom" onclick="zoomIn(0)">&#xFF0B;</button>
-        <button class="btn-zoom" onclick="zoomOut(0)">&#xFF0D;</button>
-        <button class="btn-zoom" onclick="resetZoom(0)">&#x27F3;</button>
-        <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
-      </div>
-      <div class="diagram-wrap">
-        <div class="mermaid" id="mermaid-flow"></div>
-      </div>
-    </div>
+    <!-- ── Diagrams view ─────────────────────────────────────────────────── -->
+    <div id="view-diagrams">
 
-    <!-- Traffic Sequence diagram -->
-    <div class="section-header" id="section-traffic" hidden>
-      <h2>Traffic Sequence Diagram</h2>
-      <p class="section-hint">All protocol traffic in chronological order. gRPC arrows show the RPC method name. Consecutive identical events are compressed (xN).</p>
-    </div>
-    <div class="diagram-card" id="card-traffic" hidden>
-      <div class="card-toolbar">
-        <span class="card-title">Traffic Sequence</span>
-        <button class="btn-zoom" onclick="zoomIn(1)">&#xFF0B;</button>
-        <button class="btn-zoom" onclick="zoomOut(1)">&#xFF0D;</button>
-        <button class="btn-zoom" onclick="resetZoom(1)">&#x27F3;</button>
-        <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+      <!-- Data Flow diagram -->
+      <div class="section-header" id="section-flow" hidden>
+        <h2>Data Flow Diagram</h2>
+        <p class="section-hint">Each arrow shows protocol, total packet count, and bytes transferred in that direction.</p>
       </div>
-      <div class="diagram-wrap">
-        <div class="mermaid" id="mermaid-traffic"></div>
+      <div class="diagram-card" id="card-flow" hidden>
+        <div class="card-toolbar">
+          <span class="card-title">Data Flow</span>
+          <button class="btn-zoom" onclick="zoomIn(0)">&#xFF0B;</button>
+          <button class="btn-zoom" onclick="zoomOut(0)">&#xFF0D;</button>
+          <button class="btn-zoom" onclick="resetZoom(0)">&#x27F3;</button>
+          <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+        </div>
+        <div class="diagram-wrap">
+          <div class="mermaid" id="mermaid-flow"></div>
+        </div>
       </div>
-    </div>
 
-    <!-- gRPC Sequence diagram -->
-    <div class="section-header" id="section-grpc" hidden>
-      <h2>gRPC Sequence Diagram</h2>
-      <p class="section-hint">Consecutive identical calls from the same source are compressed (xN). Sequence numbers show call order.</p>
-    </div>
-    <div class="diagram-card" id="card-grpc" hidden>
-      <div class="card-toolbar">
-        <span class="card-title">gRPC Sequence</span>
-        <button class="btn-zoom" onclick="zoomIn(2)">&#xFF0B;</button>
-        <button class="btn-zoom" onclick="zoomOut(2)">&#xFF0D;</button>
-        <button class="btn-zoom" onclick="resetZoom(2)">&#x27F3;</button>
-        <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+      <!-- Traffic Sequence diagram -->
+      <div class="section-header" id="section-traffic" hidden>
+        <h2>Traffic Sequence Diagram</h2>
+        <p class="section-hint">All protocol traffic in chronological order. gRPC arrows show the RPC method name. Consecutive identical events are compressed (xN).</p>
       </div>
-      <div class="diagram-wrap">
-        <div class="mermaid" id="mermaid-grpc"></div>
+      <div class="diagram-card" id="card-traffic" hidden>
+        <div class="card-toolbar">
+          <span class="card-title">Traffic Sequence</span>
+          <button class="btn-zoom" onclick="zoomIn(1)">&#xFF0B;</button>
+          <button class="btn-zoom" onclick="zoomOut(1)">&#xFF0D;</button>
+          <button class="btn-zoom" onclick="resetZoom(1)">&#x27F3;</button>
+          <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+        </div>
+        <div class="diagram-wrap">
+          <div class="mermaid" id="mermaid-traffic"></div>
+        </div>
       </div>
+
+      <!-- gRPC Sequence diagram -->
+      <div class="section-header" id="section-grpc" hidden>
+        <h2>gRPC Sequence Diagram</h2>
+        <p class="section-hint">Consecutive identical calls from the same source are compressed (xN). Sequence numbers show call order.</p>
+      </div>
+      <div class="diagram-card" id="card-grpc" hidden>
+        <div class="card-toolbar">
+          <span class="card-title">gRPC Sequence</span>
+          <button class="btn-zoom" onclick="zoomIn(2)">&#xFF0B;</button>
+          <button class="btn-zoom" onclick="zoomOut(2)">&#xFF0D;</button>
+          <button class="btn-zoom" onclick="resetZoom(2)">&#x27F3;</button>
+          <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
+        </div>
+        <div class="diagram-wrap">
+          <div class="mermaid" id="mermaid-grpc"></div>
+        </div>
+      </div>
+
+    </div><!-- /view-diagrams -->
+
+    <!-- ── Statistics view ───────────────────────────────────────────────── -->
+    <div id="view-stats" hidden>
+      <div id="stats-content" class="stats-body"></div>
     </div>
 
     <div id="error-card" class="error-card" hidden>

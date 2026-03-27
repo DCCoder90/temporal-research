@@ -36,15 +36,16 @@ type AnalysisOptions struct {
 
 // AnalysisResult is the JS-friendly result returned to the frontend.
 type AnalysisResult struct {
-	PcapName    string  `json:"PcapName"`
-	Duration    float64 `json:"Duration"`
-	TotalBytes  int     `json:"TotalBytes"`
-	PacketCount int     `json:"PacketCount"`
-	GRPCCount   int     `json:"GRPCCount"`
-	FilterDesc  string  `json:"FilterDesc"`
-	FlowDiagram string  `json:"FlowDiagram"`
-	SeqDiagram  string  `json:"SeqDiagram"`
-	TrafficSeq  string  `json:"TrafficSeq"` // empty string = suppressed
+	PcapName      string  `json:"PcapName"`
+	Duration      float64 `json:"Duration"`
+	TotalBytes    int     `json:"TotalBytes"`
+	PacketCount   int     `json:"PacketCount"`
+	GRPCCount     int     `json:"GRPCCount"`
+	FilterDesc    string  `json:"FilterDesc"`
+	FlowDiagram   string  `json:"FlowDiagram"`
+	SeqDiagram    string  `json:"SeqDiagram"`
+	TrafficSeq    string  `json:"TrafficSeq"`    // empty string = suppressed
+	StatsMarkdown string  `json:"StatsMarkdown"` // same content as _stats.md
 }
 
 // Analyze runs the full analysis pipeline and returns the result.
@@ -69,15 +70,16 @@ func (a *App) Analyze(pcapPath string, opts AnalysisOptions) (*AnalysisResult, e
 	}
 
 	return &AnalysisResult{
-		PcapName:    result.PcapName,
-		Duration:    result.Duration,
-		TotalBytes:  result.TotalBytes,
-		PacketCount: result.PacketCount,
-		GRPCCount:   result.GRPCCount,
-		FilterDesc:  result.FilterDesc,
-		FlowDiagram: result.FlowDiagram,
-		SeqDiagram:  result.SeqDiagram,
-		TrafficSeq:  trafficSeq,
+		PcapName:      result.PcapName,
+		Duration:      result.Duration,
+		TotalBytes:    result.TotalBytes,
+		PacketCount:   result.PacketCount,
+		GRPCCount:     result.GRPCCount,
+		FilterDesc:    result.FilterDesc,
+		FlowDiagram:   result.FlowDiagram,
+		SeqDiagram:    result.SeqDiagram,
+		TrafficSeq:    trafficSeq,
+		StatsMarkdown: result.StatsMarkdown,
 	}, nil
 }
 

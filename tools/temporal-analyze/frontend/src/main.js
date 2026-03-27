@@ -27,26 +27,24 @@ async function loadWailsBindings() {
 let currentPcapPath = null;
 let currentResult = null;
 let panZoomInstances = [];
-let mermaidReady = false;
+let activeView = 'diagrams'; // 'diagrams' | 'stats'
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
-const fileZone = document.getElementById('file-zone');
+const fileZone      = document.getElementById('file-zone');
 const fileZoneLabel = document.getElementById('file-zone-label');
-const fileZoneName = document.getElementById('file-zone-name');
-const analyzeBtn = document.getElementById('analyze-btn');
-const exportBtn = document.getElementById('export-btn');
-const statusBar = document.getElementById('status-bar');
-const emptyState = document.getElementById('empty-state');
-const metaBar = document.getElementById('meta-bar');
-const errorCard = document.getElementById('error-card');
-const errorMsg = document.getElementById('error-msg');
-
-// Diagram elements [flow, traffic, grpc]
-const cards = [
-  { section: 'section-flow',    card: 'card-flow',    mermaid: 'mermaid-flow' },
-  { section: 'section-traffic', card: 'card-traffic', mermaid: 'mermaid-traffic' },
-  { section: 'section-grpc',    card: 'card-grpc',    mermaid: 'mermaid-grpc' },
-];
+const fileZoneName  = document.getElementById('file-zone-name');
+const analyzeBtn    = document.getElementById('analyze-btn');
+const exportBtn     = document.getElementById('export-btn');
+const statusBar     = document.getElementById('status-bar');
+const emptyState    = document.getElementById('empty-state');
+const metaBar       = document.getElementById('meta-bar');
+const errorCard     = document.getElementById('error-card');
+const errorMsg      = document.getElementById('error-msg');
+const viewDiagrams  = document.getElementById('view-diagrams');
+const viewStats     = document.getElementById('view-stats');
+const statsContent  = document.getElementById('stats-content');
+const tabDiagrams   = document.getElementById('tab-diagrams');
+const tabStats      = document.getElementById('tab-stats');
 
 // ── Mermaid setup ──────────────────────────────────────────────────────────
 mermaid.initialize({
@@ -55,7 +53,18 @@ mermaid.initialize({
   sequence: { showSequenceNumbers: true, mirrorActors: false, useMaxWidth: false },
   flowchart: { curve: 'basis', useMaxWidth: false },
 });
-mermaidReady = true;
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+tabDiagrams.addEventListener('click', () => switchView('diagrams'));
+tabStats.addEventListener('click',    () => switchView('stats'));
+
+function switchView(view) {
+  activeView = view;
+  tabDiagrams.classList.toggle('active', view === 'diagrams');
+  tabStats.classList.toggle('active',    view === 'stats');
+  viewDiagrams.hidden = view !== 'diagrams';
+  viewStats.hidden    = view !== 'stats';
+}
 
 // ── Filter panel logic ─────────────────────────────────────────────────────
 const protoInput = document.getElementById('proto-value');
@@ -93,7 +102,6 @@ fileZone.addEventListener('dragleave', () => {
 fileZone.addEventListener('drop', e => {
   e.preventDefault();
   fileZone.classList.remove('drag-over');
-  // Standard HTML drop — may provide path in Wails WebView
   const files = e.dataTransfer?.files;
   if (files && files.length > 0 && files[0].path) {
     setFile(files[0].path);
@@ -188,8 +196,8 @@ async function renderResult(result) {
   panZoomInstances = [];
 
   // Clear existing mermaid content.
-  cards.forEach(c => {
-    const el = document.getElementById(c.mermaid);
+  ['mermaid-flow', 'mermaid-traffic', 'mermaid-grpc'].forEach(id => {
+    const el = document.getElementById(id);
     el.innerHTML = '';
     el.removeAttribute('data-processed');
   });
@@ -209,6 +217,9 @@ async function renderResult(result) {
     filterBadge.hidden = true;
   }
 
+  // Render statistics markdown.
+  statsContent.innerHTML = marked.parse(result.StatsMarkdown || '');
+
   // Set diagram content.
   document.getElementById('mermaid-flow').textContent    = result.FlowDiagram;
   document.getElementById('mermaid-traffic').textContent = result.TrafficSeq || '';
@@ -219,12 +230,17 @@ async function renderResult(result) {
   setVisible('section-traffic', showTraffic);
   setVisible('card-traffic', showTraffic);
 
-  // Show all other sections.
+  // Show all other diagram sections.
   ['section-flow', 'card-flow', 'section-grpc', 'card-grpc'].forEach(id => setVisible(id, true));
 
-  // Hide empty state and show meta bar.
-  emptyState.hidden = true;
+  // Hide empty state, show meta bar and view controls.
+  emptyState.hidden = false; // keep hidden by switching view below
+  emptyState.style.display = 'none';
   metaBar.hidden = false;
+  document.getElementById('view-toggle').hidden = false;
+
+  // Switch to diagrams view and run Mermaid.
+  switchView('diagrams');
 
   // Render Mermaid diagrams.
   await mermaid.run({ querySelector: '.mermaid' });
@@ -295,4 +311,6 @@ function fmtBytes(n) {
 (async () => {
   await loadWailsBindings();
   await setupWailsEvents();
+  // Hide view toggle until first analysis completes.
+  document.getElementById('view-toggle').hidden = true;
 })();

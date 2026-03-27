@@ -30,6 +30,7 @@ export namespace main {
 	    FlowDiagram: string;
 	    SeqDiagram: string;
 	    TrafficSeq: string;
+	    StatsMarkdown: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AnalysisResult(source);
@@ -46,6 +47,7 @@ export namespace main {
 	        this.FlowDiagram = source["FlowDiagram"];
 	        this.SeqDiagram = source["SeqDiagram"];
 	        this.TrafficSeq = source["TrafficSeq"];
+	        this.StatsMarkdown = source["StatsMarkdown"];
 	    }
 	}
 
