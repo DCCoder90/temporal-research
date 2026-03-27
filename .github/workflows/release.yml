@@ -20,21 +20,21 @@ jobs:
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build
-        working-directory: tools/temporal-analyze
+        working-directory: tools/temporal-lens
         run: wails build -platform darwin/universal -webview2 browser
 
       - name: Package archive
-        working-directory: tools/temporal-analyze
+        working-directory: tools/temporal-lens
         run: |
           mkdir -p dist
-          cp -r build/bin/temporal-analyze.app dist/
+          cp -r build/bin/temporal-lens.app dist/
           cp config.json dist/
-          cd dist && zip -r ../temporal-analyze-macos-universal.zip .
+          cd dist && zip -r ../temporal-lens-macos-universal.zip .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: temporal-analyze-macos-universal.zip
-          path: tools/temporal-analyze/temporal-analyze-macos-universal.zip
+          name: temporal-lens-macos-universal.zip
+          path: tools/temporal-lens/temporal-lens-macos-universal.zip
           if-no-files-found: error
 
   build-windows:
@@ -52,22 +52,22 @@ jobs:
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build
-        working-directory: tools/temporal-analyze
+        working-directory: tools/temporal-lens
         run: wails build -platform windows/amd64 -webview2 browser
 
       - name: Package archive
-        working-directory: tools/temporal-analyze
+        working-directory: tools/temporal-lens
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item build\bin\temporal-analyze.exe dist\
+          Copy-Item build\bin\temporal-lens.exe dist\
           Copy-Item config.json dist\
-          Compress-Archive -Path dist\* -DestinationPath temporal-analyze-windows-amd64.zip
+          Compress-Archive -Path dist\* -DestinationPath temporal-lens-windows-amd64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: temporal-analyze-windows-amd64.zip
-          path: tools/temporal-analyze/temporal-analyze-windows-amd64.zip
+          name: temporal-lens-windows-amd64.zip
+          path: tools/temporal-lens/temporal-lens-windows-amd64.zip
           if-no-files-found: error
 
   build-linux:
@@ -82,25 +82,25 @@ jobs:
           go-version: '1.25'
 
       - name: Build
-        working-directory: tools/temporal-analyze
+        working-directory: tools/temporal-lens
         env:
           GOOS: linux
           GOARCH: amd64
           CGO_ENABLED: '0'
-        run: go build -tags nogui -ldflags="-s -w" -o temporal-analyze .
+        run: go build -tags nogui -ldflags="-s -w" -o temporal-lens .
 
       - name: Package archive
-        working-directory: tools/temporal-analyze
+        working-directory: tools/temporal-lens
         run: |
           mkdir -p dist
-          cp temporal-analyze dist/
+          cp temporal-lens dist/
           cp config.json dist/
-          cd dist && zip -r ../temporal-analyze-linux-amd64.zip .
+          cd dist && zip -r ../temporal-lens-linux-amd64.zip .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: temporal-analyze-linux-amd64.zip
-          path: tools/temporal-analyze/temporal-analyze-linux-amd64.zip
+          name: temporal-lens-linux-amd64.zip
+          path: tools/temporal-lens/temporal-lens-linux-amd64.zip
           if-no-files-found: error
 
   release:

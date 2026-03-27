@@ -9,8 +9,8 @@ captures/reports/
 hello-world/worker/worker
 hello-world/starter/starter
 
-# temporal-analyze build output
-tools/temporal-analyze/build/bin/
-tools/temporal-analyze/temporal-analyze
-tools/temporal-analyze/temporal-analyze.exe
-tools/temporal-analyze/temporal-analyze-*
+# temporal-lens build output
+tools/temporal-lens/build/bin/
+tools/temporal-lens/temporal-lens
+tools/temporal-lens/temporal-lens.exe
+tools/temporal-lens/temporal-lens-*

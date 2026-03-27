@@ -1,4 +1,4 @@
-# temporalcoms
+# temporal-lens
 
 A local Temporal cluster running as individual Docker containers, with a Go "hello world" workflow and Wireshark for observing network traffic.
 
@@ -86,18 +86,18 @@ To open a capture:
 
 ## Analyzing captures
 
-**[tools/temporal-analyze/](tools/temporal-analyze/README.md)** — a native desktop GUI and headless CLI that produces interactive Mermaid diagrams, a statistics report, and a SQL query engine over the packet data.
+**[docs/README.md](docs/README.md)** — a native desktop GUI and headless CLI that produces interactive Mermaid diagrams, a statistics report, and a SQL query engine over the packet data.
 
 ```bash
-cd tools/temporal-analyze
-go build -tags nogui -o temporal-analyze .
+cd tools/temporal-lens
+go build -tags nogui -o temporal-lens .
 
-./temporal-analyze captures/temporal_00001.pcap              # all traffic
-./temporal-analyze captures/temporal_00001.pcap --only grpc  # gRPC only
-./temporal-analyze captures/temporal_00001.pcap --json --quiet | jq '.grpc_calls | map(.method) | unique'
+./temporal-lens captures/temporal_00001.pcap              # all traffic
+./temporal-lens captures/temporal_00001.pcap --only grpc  # gRPC only
+./temporal-lens captures/temporal_00001.pcap --json --quiet | jq '.grpc_calls | map(.method) | unique'
 ```
 
-> See **[tools/temporal-analyze/README.md](tools/temporal-analyze/README.md)** for installation, build instructions, and all flags.
+> See **[docs/README.md](docs/README.md)** for installation, build instructions, and all flags.
 
 ---
 
@@ -186,6 +186,9 @@ tshark/Dockerfile           # Minimal tshark capture image
 captures/                   # Rolling pcap files written by tshark
   reports/                  # Generated reports (gitignored)
 wireshark/hosts             # Static IP → container name mappings
+docs/
+  README.md                 # temporal-lens tool — installation and quick reference
+  user-guide.md             # Full end-user documentation
 tools/
-  temporal-analyze/         # Capture analysis tool (GUI + CLI)
+  temporal-lens/            # Capture analysis tool (GUI + CLI)
 ```
