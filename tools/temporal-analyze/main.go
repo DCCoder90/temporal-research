@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"strings"
 	"temporal-analyze/cli"
 	"temporal-analyze/internal/config"
 
@@ -18,8 +19,10 @@ import (
 var assets embed.FS
 
 func main() {
-	if len(os.Args) > 1 {
-		// CLI path: load config before running the command.
+	// Only enter CLI mode for user-supplied arguments.
+	// Wails passes its own internal flags (e.g. -wails-ensure-runtime) during
+	// binding generation — those must reach wails.Run(), not our CLI handler.
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-wails") {
 		if err := config.Load(); err != nil {
 			fmt.Fprintf(os.Stderr, "Configuration error: %s\n", err)
 			os.Exit(1)
