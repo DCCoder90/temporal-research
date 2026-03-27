@@ -18,28 +18,88 @@ Given a `.pcap` file captured from a running Temporal cluster, `temporal-analyze
 
 ---
 
-## Requirements
+## Installation
 
-- [tshark](https://www.wireshark.org/docs/man-pages/tshark.html) must be in `PATH`
-- Go 1.22+ (to build from source)
-- [Wails v2](https://wails.io) (GUI builds only)
+### Option A — Download a pre-built release (recommended)
+
+Pre-built CLI binaries are published automatically for every tagged release via GitHub Actions.
+
+1. Go to the [Releases page](https://github.com/DCCoder90/temporal-research/releases) and download the binary for your platform:
+
+   | File | Platform |
+   |------|----------|
+   | `temporal-analyze-macos-arm64` | macOS — Apple Silicon (M1/M2/M3) |
+   | `temporal-analyze-macos-x86_64` | macOS — Intel |
+   | `temporal-analyze-linux-amd64` | Linux — 64-bit |
+   | `temporal-analyze-windows-amd64.exe` | Windows — 64-bit |
+
+2. Make it executable and move it onto your `PATH` (macOS / Linux):
+
+   ```bash
+   chmod +x temporal-analyze-macos-arm64
+   mv temporal-analyze-macos-arm64 /usr/local/bin/temporal-analyze
+   ```
+
+   On Windows, rename the file to `temporal-analyze.exe` and move it to a folder that is on your `PATH`.
+
+3. Install tshark (required at runtime):
+
+   | Platform | Command |
+   |----------|---------|
+   | macOS | `brew install wireshark` |
+   | Ubuntu / Debian | `sudo apt-get install tshark` |
+   | Windows | Install [Wireshark](https://www.wireshark.org/download.html); ensure `tshark.exe` is on `PATH` |
+
+4. Verify:
+
+   ```bash
+   temporal-analyze --version
+   # temporal-analyze version 1.0.0
+
+   tshark --version
+   ```
+
+> **Note:** pre-built releases are CLI-only (`--tags nogui`). To use the GUI, build from source with Wails (see Option B).
 
 ---
 
-## Building
+### Option B — Build from source
 
-### CLI binary
+**Requirements:**
+
+| Dependency | Version | Required for |
+|------------|---------|-------------|
+| [tshark](https://www.wireshark.org/docs/man-pages/tshark.html) | any recent | runtime (both GUI and CLI) |
+| [Go](https://go.dev/dl/) | 1.22+ | building from source |
+| [Wails v2](https://wails.io) | v2 | building the GUI only |
+
+**CLI only:**
 
 ```bash
+cd tools/temporal-analyze
 go build -tags nogui -o temporal-analyze .
+mv temporal-analyze /usr/local/bin/   # or any directory on PATH
 ```
 
-### GUI (macOS .app)
+**GUI** (macOS .app):
 
 ```bash
+# Install Wails once
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+cd tools/temporal-analyze
 wails build
 # Output: build/bin/temporal-analyze.app
+
+cp -r build/bin/temporal-analyze.app /Applications/
 ```
+
+**GUI dev mode** (hot-reload):
+
+```bash
+wails dev
+```
+
 
 ### GUI (dev mode with hot-reload)
 
