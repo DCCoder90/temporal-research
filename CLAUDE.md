@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Is
 
-A local Temporal cluster environment for demonstrating workflow patterns, with network packet capture and analysis. It runs Temporal server, PostgreSQL, UI, and example workflows in Docker containers, and includes tools to capture and visualize gRPC traffic between components.
+A local Temporal cluster environment for demonstrating workflow patterns, with network packet capture and analysis. It runs Temporal server, PostgreSQL, UI, and example workflows in Docker containers, and includes a Go tool (`temporal-analyze`) to capture and visualize gRPC traffic between components.
 
 ## Common Commands
 
@@ -24,11 +24,20 @@ docker compose run --rm retries-starter
 docker compose run --rm saga-starter           # Happy path
 docker compose run --rm saga-fail-starter      # Failure path (triggers compensation)
 
-# Analyze captured packets
-./scripts/analyze.sh captures/temporal_*.pcap
-./scripts/analyze.sh captures/temporal_*.pcap --only grpc
-./scripts/analyze.sh captures/temporal_*.pcap --exclude pgsql,tcp
-./scripts/analyze.sh captures/temporal_*.pcap --only-host worker-name
+# Analyze captured packets (CLI)
+cd tools/temporal-analyze
+./temporal-analyze captures/temporal_00001.pcap
+./temporal-analyze captures/temporal_00001.pcap --only grpc
+./temporal-analyze captures/temporal_00001.pcap --exclude pgsql,tcp
+./temporal-analyze captures/temporal_00001.pcap --only-host worker-name
+./temporal-analyze captures/temporal_00001.pcap --no-interservice
+./temporal-analyze captures/temporal_00001.pcap --json --quiet | jq '.grpc_calls | map(.method) | unique'
+
+# Build temporal-analyze (CLI only)
+cd tools/temporal-analyze && go build -tags nogui -o temporal-analyze .
+
+# Build temporal-analyze (GUI — requires Wails v2)
+cd tools/temporal-analyze && wails build
 
 # Teardown (wipes all data — PostgreSQL uses tmpfs)
 docker compose down
@@ -59,7 +68,7 @@ example-name/
 └── starter/main.go           # Connects as client, starts workflow, waits for result
 ```
 
-**Analysis pipeline**: `tshark` captures raw pcap → `analyze.py` decodes gRPC frames, reconstructs message flows, and generates interactive HTML diagrams (data-flow, sequence diagrams) + JSON reports.
+**Analysis pipeline**: `tshark` captures raw pcap → `temporal-analyze` decodes IP packets and gRPC calls, resolves container IPs to names, builds interactive Mermaid diagrams, and generates HTML + Markdown reports. The tool is available as a native desktop GUI (Wails) or a headless CLI.
 
 ## Key Files
 
@@ -69,9 +78,38 @@ example-name/
 | `temporal-config/scripts/setup.sh` | DB schema init script run by `temporal-setup` container |
 | `temporal-config/dynamicconfig/docker.yaml` | Disables client version check, sets max ID length |
 | `tshark/Dockerfile` | Alpine + tshark; ring-buffer capture on `temporal-net` |
-| `wireshark/hosts` | Static IP → container name mappings for pcap display |
-| `scripts/analyze.py` | Main pcap analysis engine; auto-loads container names from docker-compose.yml if `pyyaml` is installed |
+| `wireshark/hosts` | Static IP → container name mappings for Wireshark pcap display |
+| `tools/temporal-analyze/` | Go-based pcap analysis tool (GUI + CLI); see its own README |
+| `tools/temporal-analyze/config.json` | Maps container IPs to names and ports to labels; bundled in releases |
+| `tools/temporal-analyze/docs/user-guide.md` | Full end-user documentation for temporal-analyze |
+
+## temporal-analyze Tool
+
+The analysis tool lives in `tools/temporal-analyze/`. Full documentation is in `tools/temporal-analyze/README.md` and `tools/temporal-analyze/docs/user-guide.md`.
+
+**Build tags:**
+- `nogui` — CLI-only binary (no Wails dependency); used by GitHub Actions releases
+- *(no tag)* — GUI binary (requires Wails v2 installed)
+
+**CLI flags:**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--only <protocols>` | `-o` | Comma-separated protocols to include |
+| `--exclude <protocols>` | `-x` | Comma-separated protocols to exclude |
+| `--only-host <hosts>` | | Comma-separated container names or IPs to include |
+| `--exclude-host <hosts>` | | Comma-separated hosts to exclude |
+| `--no-interservice` | | Exclude temporal-history, temporal-matching, temporal-internal-worker |
+| `--json` | | Write JSON result to stdout instead of files |
+| `--quiet` | `-q` | Suppress progress output to stderr |
+| `--version` | | Print version and exit |
+
+**Configuration**: requires `config.json` alongside the binary (or in `~/.config/temporal-analyze/`). The file maps container IPs to names and ports to labels. The application refuses to start without it — defaults matching this repo's Docker Compose setup are bundled in every GitHub release archive.
+
+**GUI note**: `config.Load()` is called in `app.startup()` (not in `main()`) so that Wails binding generation (`wails build`) does not fail when run from a temp directory that has no `config.json`. Wails-internal flags (prefixed `-wails`) bypass the CLI path entirely.
 
 ## Go Module Notes
 
 Each example has its own `go.mod`. The Dockerfiles run `go mod tidy` during build to bootstrap dependencies — this is intentional since `go.sum` files are not committed.
+
+`tools/temporal-analyze` has its own `go.mod` (module `temporal-analyze`) and is built separately from the examples.
