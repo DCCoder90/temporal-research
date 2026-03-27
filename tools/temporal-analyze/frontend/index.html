@@ -139,6 +139,11 @@
           <button class="btn-zoom" onclick="zoomIn(2)">&#xFF0B;</button>
           <button class="btn-zoom" onclick="zoomOut(2)">&#xFF0D;</button>
           <button class="btn-zoom" onclick="resetZoom(2)">&#x27F3;</button>
+          <span id="grpc-page-nav" hidden>
+            <button class="btn-zoom" id="grpc-prev-btn" onclick="grpcChangePage(-1)" disabled>&#8249;</button>
+            <span id="grpc-page-label" class="zoom-hint" style="margin:0 .15rem"></span>
+            <button class="btn-zoom" id="grpc-next-btn" onclick="grpcChangePage(1)">&#8250;</button>
+          </span>
           <span class="zoom-hint">Scroll to zoom · Drag to pan</span>
         </div>
         <div class="diagram-wrap">

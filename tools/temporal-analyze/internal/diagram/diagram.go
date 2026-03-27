@@ -93,22 +93,24 @@ func BuildFlowDiagram(packets []tshark.Packet) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// BuildSequenceDiagram builds a gRPC-only Mermaid sequenceDiagram.
-// Consecutive identical (src, dst, method) runs are compressed into (xN) annotations.
-func BuildSequenceDiagram(calls []tshark.GRPCCall) string {
+// BuildSequenceDiagram builds paginated gRPC-only Mermaid sequenceDiagrams.
+// Each page is a complete, standalone Mermaid sequenceDiagram string with all
+// participants declared so it renders independently. Consecutive identical
+// (src, dst, method) runs are compressed into (xN) annotations before paging.
+func BuildSequenceDiagram(calls []tshark.GRPCCall) []string {
 	if len(calls) == 0 {
 		ports := []string{"7233", "7234", "7235", "7239"}
 		var portArgs []string
 		for _, p := range ports {
 			portArgs = append(portArgs, fmt.Sprintf("-d tcp.port==%s,http2", p))
 		}
-		return fmt.Sprintf(
+		return []string{fmt.Sprintf(
 			"sequenceDiagram\n"+
 				"    participant tf as temporal-frontend\n"+
 				"    Note over tf: No gRPC calls decoded in this capture\n"+
 				"    Note over tf: Run tshark -r file.pcap %s -Y http2.headers.path",
 			strings.Join(portArgs, " "),
-		)
+		)}
 	}
 
 	// Collect participants in first-appearance order.
@@ -125,20 +127,51 @@ func BuildSequenceDiagram(calls []tshark.GRPCCall) string {
 		}
 	}
 
-	var b strings.Builder
-	b.WriteString("sequenceDiagram\n")
+	// Build the participant header once — reused on every page.
+	var hdr strings.Builder
+	hdr.WriteString("sequenceDiagram\n")
 	for _, p := range participants {
-		fmt.Fprintf(&b, "    participant %s as %s\n", config.MermaidID(p), p)
+		fmt.Fprintf(&hdr, "    participant %s as %s\n", config.MermaidID(p), p)
 	}
-	b.WriteString("\n")
+	hdr.WriteString("\n")
+	participantHeader := hdr.String()
 
+	// Compress all calls first, then paginate the compressed rows.
 	compressed := compress(func(yield func(string, string, string)) {
 		for _, c := range calls {
 			yield(c.Src, c.Dst, c.Method)
 		}
 	})
-	writeCompressed(&b, compressed, participants[0])
-	return strings.TrimRight(b.String(), "\n")
+
+	pageSize := config.MaxSeqEntries
+	totalPages := (len(compressed) + pageSize - 1) / pageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	pages := make([]string, 0, totalPages)
+	for page := 0; page < totalPages; page++ {
+		start := page * pageSize
+		end := start + pageSize
+		if end > len(compressed) {
+			end = len(compressed)
+		}
+
+		var b strings.Builder
+		b.WriteString(participantHeader)
+		for _, r := range compressed[start:end] {
+			sid := config.MermaidID(r.src)
+			did := config.MermaidID(r.dst)
+			display := r.label
+			if r.count > 1 {
+				display = fmt.Sprintf("%s (x%s)", r.label, config.FmtNum(r.count))
+			}
+			fmt.Fprintf(&b, "    %s->>%s: %s\n", sid, did, display)
+		}
+		pages = append(pages, strings.TrimRight(b.String(), "\n"))
+	}
+
+	return pages
 }
 
 // BuildTrafficSequenceDiagram builds a mixed-protocol Mermaid sequenceDiagram.

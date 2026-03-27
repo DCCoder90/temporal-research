@@ -46,7 +46,7 @@ type AnalysisResult struct {
 	GRPCCount     int     `json:"GRPCCount"`
 	FilterDesc    string  `json:"FilterDesc"`
 	FlowDiagram   string  `json:"FlowDiagram"`
-	SeqDiagram    string  `json:"SeqDiagram"`
+	SeqDiagrams   []string `json:"SeqDiagrams"`
 	TrafficSeq    string  `json:"TrafficSeq"`    // empty string = suppressed
 	StatsMarkdown string  `json:"StatsMarkdown"` // same content as _stats.md
 }
@@ -89,7 +89,7 @@ func (a *App) Analyze(pcapPath string, opts AnalysisOptions) (*AnalysisResult, e
 		GRPCCount:     result.GRPCCount,
 		FilterDesc:    result.FilterDesc,
 		FlowDiagram:   result.FlowDiagram,
-		SeqDiagram:    result.SeqDiagram,
+		SeqDiagrams:   result.SeqDiagrams,
 		TrafficSeq:    trafficSeq,
 		StatsMarkdown: result.StatsMarkdown,
 	}, nil

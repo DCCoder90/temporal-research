@@ -24,7 +24,7 @@ func TestGenerateHTML_Structure(t *testing.T) {
 		Packets:     testPackets,
 		GRPCCalls:   testCalls,
 		FlowDiagram: "flowchart LR\n    a([\"a\"])",
-		SeqDiagram:  "sequenceDiagram\n    participant a as a",
+		SeqDiagrams: []string{"sequenceDiagram\n    participant a as a"},
 		TrafficSeq:  &trafficSeq,
 		FilterDesc:  "",
 	})
@@ -54,7 +54,7 @@ func TestGenerateHTML_NoTrafficSeq(t *testing.T) {
 		Packets:     testPackets,
 		GRPCCalls:   testCalls,
 		FlowDiagram: "flowchart LR",
-		SeqDiagram:  "sequenceDiagram",
+		SeqDiagrams: []string{"sequenceDiagram"},
 		TrafficSeq:  nil,
 	})
 	if strings.Contains(out, "Traffic Sequence Diagram") {
@@ -68,7 +68,7 @@ func TestGenerateHTML_FilterBadge(t *testing.T) {
 		Packets:     testPackets,
 		GRPCCalls:   nil,
 		FlowDiagram: "flowchart LR",
-		SeqDiagram:  "sequenceDiagram",
+		SeqDiagrams: []string{"sequenceDiagram"},
 		FilterDesc:  "only: grpc",
 	})
 	if !strings.Contains(out, "only: grpc") {

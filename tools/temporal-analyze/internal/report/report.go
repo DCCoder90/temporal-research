@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,8 +17,8 @@ type HTMLInput struct {
 	Packets     []tshark.Packet
 	GRPCCalls   []tshark.GRPCCall
 	FlowDiagram string
-	SeqDiagram  string
-	TrafficSeq  *string // nil = omit the traffic section
+	SeqDiagrams []string // one per page; always at least one element
+	TrafficSeq  *string  // nil = omit the traffic section
 	FilterDesc  string
 }
 
@@ -57,6 +58,28 @@ func GenerateHTML(in HTMLInput) string {
 		grpcIdx = 2
 	}
 
+	// Build pagination nav for the gRPC card toolbar.
+	grpcPaginationNav := ""
+	if len(in.SeqDiagrams) > 1 {
+		grpcPaginationNav = fmt.Sprintf(
+			`<button id="grpc-prev-btn" onclick="grpcGoToPage(-1)" disabled>&#8249; Prev</button>`+
+				`<span id="grpc-page-label" style="font-size:.78rem;color:#888;margin:0 .25rem;">Page 1 of %d</span>`+
+				`<button id="grpc-next-btn" onclick="grpcGoToPage(1)">Next &#8250;</button>`,
+			len(in.SeqDiagrams),
+		)
+	}
+
+	// Marshal all pages to a JS array. Escape % so fmt.Sprintf won't misread it.
+	pagesJSON := "[]"
+	if b, err := json.Marshal(in.SeqDiagrams); err == nil {
+		pagesJSON = strings.ReplaceAll(string(b), "%", "%%")
+	}
+
+	page0 := ""
+	if len(in.SeqDiagrams) > 0 {
+		page0 = in.SeqDiagrams[0]
+	}
+
 	return fmt.Sprintf(htmlTemplate,
 		in.PcapName,
 		in.PcapName,
@@ -71,7 +94,10 @@ func GenerateHTML(in HTMLInput) string {
 		grpcIdx,
 		grpcIdx,
 		grpcIdx,
-		in.SeqDiagram,
+		grpcPaginationNav,
+		page0,
+		pagesJSON,
+		grpcIdx,
 	)
 }
 
@@ -462,10 +488,11 @@ const htmlTemplate = `<!DOCTYPE html>
       <button onclick="zoomIn(%d)">&#xFF0B; Zoom in</button>
       <button onclick="zoomOut(%d)">&#xFF0D; Zoom out</button>
       <button onclick="resetZoom(%d)">&#x27F3; Reset</button>
+      %s
       <span class="zoom-hint">Scroll to zoom &nbsp;&middot;&nbsp; Drag to pan</span>
     </div>
     <div class="diagram-wrap">
-      <div class="mermaid">
+      <div class="mermaid" id="mermaid-grpc">
 %s
       </div>
     </div>
@@ -475,6 +502,9 @@ const htmlTemplate = `<!DOCTYPE html>
 
   <script>
     const panZoomInstances = [];
+    var grpcPages = %s;
+    var grpcPageIdx = 0;
+    var grpcPZIdx = %d;
 
     mermaid.initialize({
       startOnLoad: false,
@@ -511,6 +541,43 @@ const htmlTemplate = `<!DOCTYPE html>
         panZoomInstances[i].fit();
         panZoomInstances[i].center();
       }
+    }
+
+    async function grpcGoToPage(delta) {
+      var next = grpcPageIdx + delta;
+      if (next < 0 || next >= grpcPages.length) return;
+      grpcPageIdx = next;
+
+      var el = document.getElementById("mermaid-grpc");
+      el.innerHTML = "";
+      el.removeAttribute("data-processed");
+      el.textContent = grpcPages[grpcPageIdx];
+
+      if (panZoomInstances[grpcPZIdx]) {
+        panZoomInstances[grpcPZIdx].destroy();
+        panZoomInstances[grpcPZIdx] = null;
+      }
+
+      await mermaid.run({ querySelector: "#mermaid-grpc" });
+
+      var svg = el.querySelector("svg");
+      if (svg) {
+        svg.style.width = "100%%";
+        svg.style.height = "100%%";
+        panZoomInstances[grpcPZIdx] = svgPanZoom(svg, {
+          zoomEnabled: true, controlIconsEnabled: false,
+          fit: true, center: true,
+          minZoom: 0.05, maxZoom: 30,
+          zoomScaleSensitivity: 0.3, mouseWheelZoomEnabled: true
+        });
+      }
+
+      var lbl = document.getElementById("grpc-page-label");
+      var prev = document.getElementById("grpc-prev-btn");
+      var nxt  = document.getElementById("grpc-next-btn");
+      if (lbl) lbl.textContent = "Page " + (grpcPageIdx + 1) + " of " + grpcPages.length;
+      if (prev) prev.disabled = grpcPageIdx === 0;
+      if (nxt)  nxt.disabled  = grpcPageIdx === grpcPages.length - 1;
     }
   </script>
 </body>

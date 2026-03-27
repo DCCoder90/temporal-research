@@ -32,6 +32,9 @@ let panZoomInstances = [];
 let activeView = 'diagrams'; // 'diagrams' | 'stats' | 'query'
 let queryEditor = null;      // CodeMirror instance
 let lastQueryResult = null;  // most recent QueryResult for CSV export
+let grpcDiagrams = [];       // all gRPC sequence diagram pages
+let grpcPage = 0;            // current page index
+let grpcPanZoomIdx = -1;     // index into panZoomInstances for the gRPC diagram
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const fileZone      = document.getElementById('file-zone');
@@ -237,9 +240,22 @@ async function renderResult(result) {
   statsContent.innerHTML = marked.parse(result.StatsMarkdown || '');
 
   // Set diagram content.
+  grpcDiagrams = result.SeqDiagrams || [];
+  grpcPage = 0;
   document.getElementById('mermaid-flow').textContent    = result.FlowDiagram;
   document.getElementById('mermaid-traffic').textContent = result.TrafficSeq || '';
-  document.getElementById('mermaid-grpc').textContent    = result.SeqDiagram;
+  document.getElementById('mermaid-grpc').textContent    = grpcDiagrams[0] || '';
+
+  // Set up gRPC pagination controls.
+  const grpcPageNav = document.getElementById('grpc-page-nav');
+  if (grpcDiagrams.length > 1) {
+    grpcPageNav.hidden = false;
+    document.getElementById('grpc-page-label').textContent = `Page 1 of ${grpcDiagrams.length}`;
+    document.getElementById('grpc-prev-btn').disabled = true;
+    document.getElementById('grpc-next-btn').disabled = grpcDiagrams.length <= 1;
+  } else {
+    grpcPageNav.hidden = true;
+  }
 
   // Show/hide traffic section.
   const showTraffic = Boolean(result.TrafficSeq);
@@ -277,9 +293,54 @@ async function renderResult(result) {
     });
     panZoomInstances.push(instance);
   });
+
+  // The gRPC diagram is always the last rendered SVG.
+  grpcPanZoomIdx = panZoomInstances.length - 1;
+}
+
+// ── gRPC diagram page navigation ───────────────────────────────────────────
+async function grpcChangePage(delta) {
+  const next = grpcPage + delta;
+  if (next < 0 || next >= grpcDiagrams.length) return;
+  grpcPage = next;
+
+  // Destroy the old pan-zoom instance for this diagram.
+  if (grpcPanZoomIdx >= 0 && panZoomInstances[grpcPanZoomIdx]) {
+    try { panZoomInstances[grpcPanZoomIdx].destroy(); } catch {}
+    panZoomInstances[grpcPanZoomIdx] = null;
+  }
+
+  // Swap in new page content and re-render.
+  const el = document.getElementById('mermaid-grpc');
+  el.innerHTML = '';
+  el.removeAttribute('data-processed');
+  el.textContent = grpcDiagrams[grpcPage];
+
+  await mermaid.run({ querySelector: '#mermaid-grpc' });
+
+  const svg = el.querySelector('svg');
+  if (svg) {
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    panZoomInstances[grpcPanZoomIdx] = svgPanZoom(svg, {
+      zoomEnabled: true,
+      controlIconsEnabled: false,
+      fit: true,
+      center: true,
+      minZoom: 0.05,
+      maxZoom: 30,
+      zoomScaleSensitivity: 0.3,
+      mouseWheelZoomEnabled: true,
+    });
+  }
+
+  document.getElementById('grpc-page-label').textContent = `Page ${grpcPage + 1} of ${grpcDiagrams.length}`;
+  document.getElementById('grpc-prev-btn').disabled = grpcPage === 0;
+  document.getElementById('grpc-next-btn').disabled = grpcPage === grpcDiagrams.length - 1;
 }
 
 // ── Zoom controls ──────────────────────────────────────────────────────────
+window.grpcChangePage = grpcChangePage;
 window.zoomIn    = i => { if (panZoomInstances[i]) panZoomInstances[i].zoomIn(); };
 window.zoomOut   = i => { if (panZoomInstances[i]) panZoomInstances[i].zoomOut(); };
 window.resetZoom = i => {

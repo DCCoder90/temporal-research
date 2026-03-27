@@ -28,7 +28,7 @@ export namespace main {
 	    GRPCCount: number;
 	    FilterDesc: string;
 	    FlowDiagram: string;
-	    SeqDiagram: string;
+	    SeqDiagrams: string[];
 	    TrafficSeq: string;
 	    StatsMarkdown: string;
 	
@@ -45,7 +45,7 @@ export namespace main {
 	        this.GRPCCount = source["GRPCCount"];
 	        this.FilterDesc = source["FilterDesc"];
 	        this.FlowDiagram = source["FlowDiagram"];
-	        this.SeqDiagram = source["SeqDiagram"];
+	        this.SeqDiagrams = source["SeqDiagrams"];
 	        this.TrafficSeq = source["TrafficSeq"];
 	        this.StatsMarkdown = source["StatsMarkdown"];
 	    }

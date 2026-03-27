@@ -50,26 +50,35 @@ func TestBuildFlowDiagram_PostgreSQLCylinder(t *testing.T) {
 }
 
 func TestBuildSequenceDiagram_EmptyCalls(t *testing.T) {
-	out := diagram.BuildSequenceDiagram(nil)
-	if !strings.HasPrefix(out, "sequenceDiagram") {
+	pages := diagram.BuildSequenceDiagram(nil)
+	if len(pages) != 1 {
+		t.Fatalf("expected 1 page, got %d", len(pages))
+	}
+	if !strings.HasPrefix(pages[0], "sequenceDiagram") {
 		t.Error("expected sequenceDiagram prefix")
 	}
-	if !strings.Contains(out, "No gRPC calls decoded") {
+	if !strings.Contains(pages[0], "No gRPC calls decoded") {
 		t.Error("expected fallback message for empty calls")
 	}
 }
 
 func TestBuildSequenceDiagram_Compression(t *testing.T) {
-	out := diagram.BuildSequenceDiagram(seqCalls)
+	pages := diagram.BuildSequenceDiagram(seqCalls)
+	if len(pages) == 0 {
+		t.Fatal("expected at least one page")
+	}
 	// Two consecutive identical StartWorkflowExecution calls should be compressed to x2.
-	if !strings.Contains(out, "x2") {
+	if !strings.Contains(pages[0], "x2") {
 		t.Error("expected (x2) compression for repeated calls")
 	}
 }
 
 func TestBuildSequenceDiagram_ContainsParticipants(t *testing.T) {
-	out := diagram.BuildSequenceDiagram(seqCalls)
-	if !strings.Contains(out, "participant") {
+	pages := diagram.BuildSequenceDiagram(seqCalls)
+	if len(pages) == 0 {
+		t.Fatal("expected at least one page")
+	}
+	if !strings.Contains(pages[0], "participant") {
 		t.Error("expected participant declarations")
 	}
 }

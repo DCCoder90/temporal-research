@@ -31,8 +31,8 @@ type Result struct {
 	GRPCCount     int
 	FilterDesc    string
 	FlowDiagram   string
-	SeqDiagram    string
-	TrafficSeq    *string // nil when suppressed (grpc-only filter)
+	SeqDiagrams   []string // one entry per page; always at least one element
+	TrafficSeq    *string  // nil when suppressed (grpc-only filter)
 	StatsMarkdown string  // same content written to _stats.md by the CLI
 	// Full slices retained for export and querying.
 	Packets   []tshark.Packet
@@ -86,7 +86,7 @@ func Run(pcapPath string, opts Options) (*Result, error) {
 
 	// Build diagrams.
 	flowDiagram := diagram.BuildFlowDiagram(packets)
-	seqDiagram := diagram.BuildSequenceDiagram(grpcCalls)
+	seqDiagrams := diagram.BuildSequenceDiagram(grpcCalls)
 
 	var trafficSeq *string
 	if filter.ShowTrafficSeq(opts.Filter) {
@@ -104,7 +104,7 @@ func Run(pcapPath string, opts Options) (*Result, error) {
 		GRPCCount:     len(grpcCalls),
 		FilterDesc:    filterDesc,
 		FlowDiagram:   flowDiagram,
-		SeqDiagram:    seqDiagram,
+		SeqDiagrams:   seqDiagrams,
 		TrafficSeq:    trafficSeq,
 		StatsMarkdown: statsMarkdown,
 		Packets:       packets,
@@ -137,7 +137,7 @@ func WriteResult(pcapPath string, result *Result) ([]string, error) {
 		Packets:     result.Packets,
 		GRPCCalls:   result.GRPCCalls,
 		FlowDiagram: result.FlowDiagram,
-		SeqDiagram:  result.SeqDiagram,
+		SeqDiagrams: result.SeqDiagrams,
 		TrafficSeq:  result.TrafficSeq,
 		FilterDesc:  result.FilterDesc,
 	})
