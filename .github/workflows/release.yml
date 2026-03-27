@@ -17,7 +17,7 @@ jobs:
           go-version: '1.25'
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.9.1
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build
         working-directory: tools/temporal-analyze
@@ -49,7 +49,7 @@ jobs:
           go-version: '1.25'
 
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.9.1
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build
         working-directory: tools/temporal-analyze
