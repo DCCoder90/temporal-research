@@ -86,9 +86,27 @@ To open a capture:
 
 ## Analyzing captures
 
+Two analysis tools are available:
+
+### temporal-analyze (GUI + CLI)
+
+**[tools/temporal-analyze/](tools/temporal-analyze/README.md)** — a native desktop GUI and headless CLI that produces interactive Mermaid diagrams, a statistics report, and a SQL query engine over the packet data.
+
+```bash
+cd tools/temporal-analyze
+go build -tags nogui -o temporal-analyze .
+
+./temporal-analyze captures/temporal_00001.pcap              # all traffic
+./temporal-analyze captures/temporal_00001.pcap --only grpc  # gRPC only
+./temporal-analyze captures/temporal_00001.pcap --json --quiet | jq '.grpc_calls | map(.method) | unique'
+```
+
+> See **[tools/temporal-analyze/README.md](tools/temporal-analyze/README.md)** for build instructions and all flags.
+
+### analyze.sh (Python script)
+
 See **[scripts/ANALYZE.md](scripts/ANALYZE.md)** for full usage, all flags, and output descriptions.
 
-Quick start:
 ```bash
 ./scripts/analyze.sh captures/temporal_00001.pcap                          # all traffic
 ./scripts/analyze.sh captures/temporal_00001.pcap --only grpc              # gRPC only
