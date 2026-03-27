@@ -8,3 +8,9 @@ captures/reports/
 # Go build artifacts
 hello-world/worker/worker
 hello-world/starter/starter
+
+# temporal-analyze build output
+tools/temporal-analyze/build/bin/
+tools/temporal-analyze/temporal-analyze
+tools/temporal-analyze/temporal-analyze.exe
+tools/temporal-analyze/temporal-analyze-*

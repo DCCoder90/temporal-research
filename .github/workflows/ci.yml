@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build and test (nogui)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: tools/temporal-analyze/go.sum
+
+      - name: Build
+        working-directory: tools/temporal-analyze
+        env:
+          CGO_ENABLED: '0'
+        run: go build -tags nogui ./...
+
+      - name: Test
+        working-directory: tools/temporal-analyze
+        env:
+          CGO_ENABLED: '0'
+        run: go test -tags nogui -v ./...

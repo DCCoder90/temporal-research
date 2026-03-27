@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "temporal-analyze",
+  "outputfilename": "temporal-analyze",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "auto",
+  "wailsjsdir": "./frontend/src",
+  "version": "2",
+  "info": {
+    "companyName": "temporalcoms",
+    "productName": "Temporal Analyze",
+    "productVersion": "1.0.0",
+    "copyright": "temporalcoms",
+    "comments": "Analyze Temporal .pcap captures"
+  },
+  "author": {
+    "name": "temporalcoms"
+  }
+}

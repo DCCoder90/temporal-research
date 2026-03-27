@@ -1,0 +1,112 @@
+//go:build !nogui
+
+package main
+
+import (
+	"context"
+	"temporal-analyze/internal/analysis"
+	"temporal-analyze/internal/config"
+	"temporal-analyze/internal/filter"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+// App holds the Wails application state.
+type App struct {
+	ctx context.Context
+}
+
+// NewApp creates a new App instance.
+func NewApp() *App {
+	return &App{}
+}
+
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+}
+
+// AnalysisOptions is the JS-friendly options struct passed from the frontend.
+type AnalysisOptions struct {
+	Only           []string `json:"Only"`
+	Exclude        []string `json:"Exclude"`
+	OnlyHosts      []string `json:"OnlyHosts"`
+	ExcludeHosts   []string `json:"ExcludeHosts"`
+	NoInterservice bool     `json:"NoInterservice"`
+}
+
+// AnalysisResult is the JS-friendly result returned to the frontend.
+type AnalysisResult struct {
+	PcapName    string  `json:"PcapName"`
+	Duration    float64 `json:"Duration"`
+	TotalBytes  int     `json:"TotalBytes"`
+	PacketCount int     `json:"PacketCount"`
+	GRPCCount   int     `json:"GRPCCount"`
+	FilterDesc  string  `json:"FilterDesc"`
+	FlowDiagram string  `json:"FlowDiagram"`
+	SeqDiagram  string  `json:"SeqDiagram"`
+	TrafficSeq  string  `json:"TrafficSeq"` // empty string = suppressed
+}
+
+// Analyze runs the full analysis pipeline and returns the result.
+// Called from the frontend via Wails JS bindings.
+func (a *App) Analyze(pcapPath string, opts AnalysisOptions) (*AnalysisResult, error) {
+	result, err := analysis.Run(pcapPath, analysis.Options{
+		Filter: filter.FilterOptions{
+			Only:           opts.Only,
+			Exclude:        opts.Exclude,
+			OnlyHosts:      opts.OnlyHosts,
+			ExcludeHosts:   opts.ExcludeHosts,
+			NoInterservice: opts.NoInterservice,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	trafficSeq := ""
+	if result.TrafficSeq != nil {
+		trafficSeq = *result.TrafficSeq
+	}
+
+	return &AnalysisResult{
+		PcapName:    result.PcapName,
+		Duration:    result.Duration,
+		TotalBytes:  result.TotalBytes,
+		PacketCount: result.PacketCount,
+		GRPCCount:   result.GRPCCount,
+		FilterDesc:  result.FilterDesc,
+		FlowDiagram: result.FlowDiagram,
+		SeqDiagram:  result.SeqDiagram,
+		TrafficSeq:  trafficSeq,
+	}, nil
+}
+
+// Export writes the HTML and Markdown report files adjacent to the pcap.
+// Returns the two output file paths.
+func (a *App) Export(pcapPath string, opts AnalysisOptions) ([]string, error) {
+	return analysis.Export(pcapPath, analysis.Options{
+		Filter: filter.FilterOptions{
+			Only:           opts.Only,
+			Exclude:        opts.Exclude,
+			OnlyHosts:      opts.OnlyHosts,
+			ExcludeHosts:   opts.ExcludeHosts,
+			NoInterservice: opts.NoInterservice,
+		},
+	})
+}
+
+// OpenFileDialog opens a native file picker and returns the selected path.
+func (a *App) OpenFileDialog() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select PCAP file",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "PCAP files (*.pcap)", Pattern: "*.pcap"},
+			{DisplayName: "All files", Pattern: "*"},
+		},
+	})
+}
+
+// ResolveIP maps a container IP to its name.
+func (a *App) ResolveIP(ip string) string {
+	return config.Resolve(ip)
+}
