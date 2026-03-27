@@ -33,14 +33,22 @@ Pre-built CLI binaries are published automatically for every tagged release via 
    | `temporal-analyze-linux-amd64` | Linux — 64-bit |
    | `temporal-analyze-windows-amd64.exe` | Windows — 64-bit |
 
-2. Make it executable and move it onto your `PATH` (macOS / Linux):
+2. Extract the archive. Each release zip contains two files:
 
-   ```bash
-   chmod +x temporal-analyze-macos-arm64
-   mv temporal-analyze-macos-arm64 /usr/local/bin/temporal-analyze
+   ```
+   temporal-analyze   (or temporal-analyze.exe on Windows)
+   config.json
    ```
 
-   On Windows, rename the file to `temporal-analyze.exe` and move it to a folder that is on your `PATH`.
+3. Move the binary and `config.json` to the same directory, somewhere on your `PATH` (macOS / Linux):
+
+   ```bash
+   unzip temporal-analyze-macos-arm64.zip -d /usr/local/bin/
+   ```
+
+   On Windows, extract the zip and move both files to a folder on your `PATH`.
+
+   > `config.json` must be present alongside the binary (or in `~/.config/temporal-analyze/`). The application will not start without it — see [Configuration files](#configuration-files).
 
 3. Install tshark (required at runtime):
 
@@ -105,6 +113,36 @@ wails dev
 
 ```bash
 wails dev
+```
+
+---
+
+## Configuration files
+
+`temporal-analyze` requires a `config.json` file at startup. If it is missing the application will print an error and exit.
+
+| File | Format | Purpose |
+|------|--------|---------|
+| `config.json` | JSON | Maps container IPs to names and TCP ports to labels |
+
+**Search locations** (checked in order):
+1. Same directory as the binary
+2. `~/.config/temporal-analyze/`
+
+A default `config.json` matching the standard `temporalcoms` Docker Compose setup is bundled in every release archive. Edit it freely to match your own cluster's IPs and service names.
+
+Example `config.json`:
+```json
+{
+  "hosts": {
+    "10.0.0.5": "my-temporal-frontend",
+    "10.0.0.6": "my-worker"
+  },
+  "ports": {
+    "7233": "Temporal gRPC (frontend)",
+    "5432": "PostgreSQL"
+  }
+}
 ```
 
 ---

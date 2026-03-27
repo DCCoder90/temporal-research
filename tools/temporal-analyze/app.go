@@ -29,6 +29,14 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if err := config.Load(); err != nil {
+		runtime.LogErrorf(ctx, "Configuration error: %s", err)
+		runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+			Type:    runtime.ErrorDialog,
+			Title:   "Configuration Error",
+			Message: fmt.Sprintf("Configuration error:\n\n%s", err),
+		})
+	}
 }
 
 // AnalysisOptions is the JS-friendly options struct passed from the frontend.

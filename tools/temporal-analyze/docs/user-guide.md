@@ -7,7 +7,8 @@
 ## Table of contents
 
 1. [Requirements](#requirements)
-2. [GUI mode](#gui-mode)
+2. [Configuration files](#configuration-files)
+3. [GUI mode](#gui-mode)
    - [Opening a capture](#opening-a-capture)
    - [Filter panel](#filter-panel)
    - [Running analysis](#running-analysis)
@@ -15,7 +16,7 @@
    - [Statistics tab](#statistics-tab)
    - [Query tab](#query-tab)
    - [Exporting reports](#exporting-reports)
-3. [CLI mode](#cli-mode)
+4. [CLI mode](#cli-mode)
    - [Basic usage](#basic-usage)
    - [Flags reference](#flags-reference)
    - [Protocol names](#protocol-names)
@@ -41,6 +42,75 @@
   - Ubuntu/Debian: `sudo apt-get install tshark`
   - Windows: install [Wireshark](https://www.wireshark.org/download.html) and ensure `tshark.exe` is on `PATH`
 - Capture files must be in standard `.pcap` format (as written by tshark's ring-buffer)
+
+---
+
+## Configuration files
+
+`temporal-analyze` reads `config.json` at startup to know how to resolve container IPs to names and how to label protocol ports. **The file must be present** — the application will refuse to start if it is missing.
+
+### File locations
+
+The tool searches for `config.json` in the following locations, in order:
+
+1. **The directory containing the binary** — the most convenient location for CLI users. Extract the release archive and keep both files together.
+2. **`~/.config/temporal-analyze/`** — the preferred location for the GUI, since the binary lives inside a `.app` bundle on macOS.
+
+### config.json
+
+A single JSON file with two top-level maps:
+
+```json
+{
+  "hosts": {
+    "172.20.0.21": "temporal-frontend",
+    "172.20.0.22": "temporal-history",
+    "172.20.0.10": "postgresql",
+    "10.0.0.10": "order-worker",
+    "10.0.0.11": "payment-worker"
+  },
+  "ports": {
+    "7233": "Temporal gRPC (frontend)",
+    "5432": "PostgreSQL",
+    "8080": "HTTP (Temporal UI)",
+    "9090": "My custom service"
+  }
+}
+```
+
+- **`hosts`** — maps container IP addresses to human-readable names. These names appear in diagrams, statistics, and SQL query results. Any IP not listed is displayed as its raw address.
+- **`ports`** — maps TCP port numbers to human-readable labels used in the Protocol Breakdown table and connection matrix.
+
+> **Note:** the gRPC ports used for packet decoding (`7233`, `7234`, `7235`, `7239`) are fixed Temporal protocol constants and cannot be changed via `config.json`. Only the display labels are configurable here.
+
+### Customising for your own cluster
+
+If your Temporal cluster uses different IPs or service names than the defaults:
+
+1. Open `config.json` in any text editor
+2. Replace the IP addresses and names in the `"hosts"` map to match your setup
+3. Add entries for any custom workers or services you want named in diagrams
+4. Update `"ports"` if you use non-standard port numbers
+5. Restart `temporal-analyze`
+
+A default `config.json` for the standard `temporalcoms` Docker Compose setup is included in every release archive. It is a good starting point for customisation.
+
+### Error if file is missing
+
+If `config.json` is not found at startup, the application prints an error listing where it looked:
+
+```
+Configuration error: config.json not found
+
+Searched:
+  /usr/local/bin
+  /Users/yourname/.config/temporal-analyze
+
+Place config.json in one of these directories.
+A default config.json is included in each release archive.
+```
+
+Download the default `config.json` from the [Releases page](https://github.com/DCCoder90/temporal-research/releases) (it is bundled inside each release `.zip`) and place it in one of the listed directories.
 
 ---
 
@@ -476,6 +546,12 @@ ORDER BY syn_count DESC;
 
 ## Troubleshooting
 
+### "Configuration error: config.json not found"
+
+The application requires `config.json` to be present before it can start. It searches in the binary's directory first, then `~/.config/temporal-analyze/`. See [Configuration files](#configuration-files) for full details.
+
+Download the default `config.json` from the [Releases page](https://github.com/DCCoder90/temporal-research/releases) (it is bundled inside each release `.zip`) and place it in the appropriate directory.
+
 ### "tshark not found in PATH"
 
 Install tshark and ensure the directory containing it is on your `PATH`. On macOS with Homebrew: `brew install wireshark`. Verify with `tshark --version`.
@@ -503,7 +579,7 @@ tshark -r capture.pcap \
 The combination of protocol and host filters removed all packets. Try:
 - Removing the host filter and rerunning to check the protocol filter alone
 - Using `--exclude` instead of `--only`
-- Checking container names with `docker ps` — the name must exactly match what's in `config.go`
+- Checking container names with `docker ps` — the name must exactly match an entry in `config.json`
 
 ### Statistics show 0 gRPC calls but packets exist
 

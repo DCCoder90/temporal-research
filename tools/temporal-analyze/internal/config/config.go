@@ -1,12 +1,17 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-// IPToName maps static container IPs to their human-readable names.
+// IPToName maps container IPs to human-readable names.
+// Pre-populated with defaults so that tests that do not call Load() continue to work.
+// Load() replaces this map with data from config.json.
 var IPToName = map[string]string{
 	"172.20.0.10": "postgresql",
 	"172.20.0.21": "temporal-frontend",
@@ -33,15 +38,10 @@ var IPToName = map[string]string{
 }
 
 // NameToIP is the reverse of IPToName.
-var NameToIP = func() map[string]string {
-	m := make(map[string]string, len(IPToName))
-	for ip, name := range IPToName {
-		m[name] = ip
-	}
-	return m
-}()
+var NameToIP = reverseMap(IPToName)
 
 // PortLabels maps well-known port numbers to human-readable labels.
+// Pre-populated with defaults; replaced by Load().
 var PortLabels = map[string]string{
 	"7233": "Temporal gRPC (frontend)",
 	"7234": "Temporal gRPC (history)",
@@ -56,6 +56,7 @@ var PortLabels = map[string]string{
 }
 
 // GRPCPorts is the set of ports that carry Temporal gRPC (HTTP/2) traffic.
+// These are Temporal protocol constants and are not user-configurable.
 var GRPCPorts = map[string]bool{
 	"7233": true,
 	"7234": true,
@@ -64,14 +65,12 @@ var GRPCPorts = map[string]bool{
 }
 
 // InterserviceHosts are excluded when --no-interservice is set.
+// These are matched against the name column of config.json.
 var InterserviceHosts = []string{
 	"temporal-history",
 	"temporal-matching",
 	"temporal-internal-worker",
 }
-
-// MaxSeqEntries is the maximum compressed rows shown in a sequence diagram.
-const MaxSeqEntries = 150
 
 // ProtoPorts maps user-facing protocol filter names to the ports they cover.
 var ProtoPorts = map[string][]string{
@@ -84,6 +83,109 @@ var ProtoPorts = map[string][]string{
 
 // GRPCProtoNames are the protocol filter names that select gRPC traffic.
 var GRPCProtoNames = map[string]bool{"grpc": true, "http2": true}
+
+// MaxSeqEntries is the maximum compressed rows shown in a sequence diagram page.
+const MaxSeqEntries = 150
+
+// configFile is the structure of config.json.
+type configFile struct {
+	Hosts map[string]string `json:"hosts"`
+	Ports map[string]string `json:"ports"`
+}
+
+// Load reads config.json from the first directory in ConfigSearchDirs() that
+// contains it. Returns a descriptive error if the file is missing or cannot be
+// parsed. Must be called at program startup before any analysis runs.
+func Load() error {
+	dirs := ConfigSearchDirs()
+
+	cfgPath := findFile(dirs, "config.json")
+	if cfgPath == "" {
+		return fmt.Errorf(
+			"config.json not found\n\nSearched:\n%s\n\nPlace config.json in one of these directories.\nA default config.json is included in each release archive.",
+			formatDirs(dirs),
+		)
+	}
+
+	cfg, err := readConfigJSON(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	IPToName = cfg.Hosts
+	NameToIP = reverseMap(cfg.Hosts)
+	PortLabels = cfg.Ports
+	return nil
+}
+
+// ConfigSearchDirs returns the directories searched for config.json,
+// in priority order: executable directory first, then ~/.config/temporal-analyze/.
+// Useful for printing helpful error messages to the user.
+func ConfigSearchDirs() []string {
+	var dirs []string
+
+	if exe, err := os.Executable(); err == nil {
+		dirs = append(dirs, filepath.Dir(exe))
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".config", "temporal-analyze"))
+	}
+
+	return dirs
+}
+
+// ── JSON loader ───────────────────────────────────────────────────────────────
+
+func readConfigJSON(path string) (*configFile, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening %s: %w", path, err)
+	}
+	defer f.Close()
+
+	var cfg configFile
+	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if len(cfg.Hosts) == 0 {
+		return nil, fmt.Errorf("%s: \"hosts\" map is empty or missing", path)
+	}
+	if len(cfg.Ports) == 0 {
+		return nil, fmt.Errorf("%s: \"ports\" map is empty or missing", path)
+	}
+	return &cfg, nil
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+func findFile(dirs []string, name string) string {
+	for _, dir := range dirs {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func formatDirs(dirs []string) string {
+	lines := make([]string, len(dirs))
+	for i, d := range dirs {
+		lines[i] = "  " + d
+	}
+	return strings.Join(lines, "\n")
+}
+
+func reverseMap(m map[string]string) map[string]string {
+	r := make(map[string]string, len(m))
+	for k, v := range m {
+		r[v] = k
+	}
+	return r
+}
+
+// ── Public utilities ──────────────────────────────────────────────────────────
 
 // Resolve maps a container IP to its name, returning the raw IP if unknown.
 func Resolve(ip string) string {

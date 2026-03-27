@@ -4,8 +4,10 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"os"
 	"temporal-analyze/cli"
+	"temporal-analyze/internal/config"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -17,6 +19,11 @@ var assets embed.FS
 
 func main() {
 	if len(os.Args) > 1 {
+		// CLI path: load config before running the command.
+		if err := config.Load(); err != nil {
+			fmt.Fprintf(os.Stderr, "Configuration error: %s\n", err)
+			os.Exit(1)
+		}
 		cli.Run(os.Args[1:])
 		return
 	}

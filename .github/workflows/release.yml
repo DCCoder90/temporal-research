@@ -7,23 +7,27 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.artifact }}
+    name: Build ${{ matrix.archive }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goos: darwin
             goarch: arm64
-            artifact: temporal-analyze-macos-arm64
+            binary: temporal-analyze
+            archive: temporal-analyze-macos-arm64.zip
           - goos: darwin
             goarch: amd64
-            artifact: temporal-analyze-macos-x86_64
+            binary: temporal-analyze
+            archive: temporal-analyze-macos-x86_64.zip
           - goos: windows
             goarch: amd64
-            artifact: temporal-analyze-windows-amd64.exe
+            binary: temporal-analyze.exe
+            archive: temporal-analyze-windows-amd64.zip
           - goos: linux
             goarch: amd64
-            artifact: temporal-analyze-linux-amd64
+            binary: temporal-analyze
+            archive: temporal-analyze-linux-amd64.zip
 
     steps:
       - uses: actions/checkout@v4
@@ -39,13 +43,21 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: |
-          go build -tags nogui -ldflags="-s -w" -o ${{ matrix.artifact }} .
+          go build -tags nogui -ldflags="-s -w" -o ${{ matrix.binary }} .
+
+      - name: Package archive
+        working-directory: tools/temporal-analyze
+        run: |
+          mkdir -p dist
+          cp ${{ matrix.binary }} dist/
+          cp config.json dist/
+          cd dist && zip -r ../${{ matrix.archive }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: tools/temporal-analyze/${{ matrix.artifact }}
+          name: ${{ matrix.archive }}
+          path: tools/temporal-analyze/${{ matrix.archive }}
           if-no-files-found: error
 
   release:
