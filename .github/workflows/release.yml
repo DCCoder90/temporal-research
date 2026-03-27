@@ -6,64 +6,108 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    name: Build ${{ matrix.archive }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: darwin
-            goarch: arm64
-            binary: temporal-analyze
-            archive: temporal-analyze-macos-arm64.zip
-          - goos: darwin
-            goarch: amd64
-            binary: temporal-analyze
-            archive: temporal-analyze-macos-x86_64.zip
-          - goos: windows
-            goarch: amd64
-            binary: temporal-analyze.exe
-            archive: temporal-analyze-windows-amd64.zip
-          - goos: linux
-            goarch: amd64
-            binary: temporal-analyze
-            archive: temporal-analyze-linux-amd64.zip
+  build-macos:
+    name: Build macOS (universal)
+    runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
 
-      - name: Build release binary
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.9.1
+
+      - name: Build
         working-directory: tools/temporal-analyze
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
-        run: |
-          go build -tags nogui -ldflags="-s -w" -o ${{ matrix.binary }} .
+        run: wails build -platform darwin/universal -webview2 browser
 
       - name: Package archive
         working-directory: tools/temporal-analyze
         run: |
           mkdir -p dist
-          cp ${{ matrix.binary }} dist/
+          cp -r build/bin/temporal-analyze.app dist/
           cp config.json dist/
-          cd dist && zip -r ../${{ matrix.archive }} .
+          cd dist && zip -r ../temporal-analyze-macos-universal.zip .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive }}
-          path: tools/temporal-analyze/${{ matrix.archive }}
+          name: temporal-analyze-macos-universal.zip
+          path: tools/temporal-analyze/temporal-analyze-macos-universal.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (amd64)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.9.1
+
+      - name: Build
+        working-directory: tools/temporal-analyze
+        run: wails build -platform windows/amd64 -webview2 browser
+
+      - name: Package archive
+        working-directory: tools/temporal-analyze
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item build\bin\temporal-analyze.exe dist\
+          Copy-Item config.json dist\
+          Compress-Archive -Path dist\* -DestinationPath temporal-analyze-windows-amd64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: temporal-analyze-windows-amd64.zip
+          path: tools/temporal-analyze/temporal-analyze-windows-amd64.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (amd64, CLI only)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build
+        working-directory: tools/temporal-analyze
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: go build -tags nogui -ldflags="-s -w" -o temporal-analyze .
+
+      - name: Package archive
+        working-directory: tools/temporal-analyze
+        run: |
+          mkdir -p dist
+          cp temporal-analyze dist/
+          cp config.json dist/
+          cd dist && zip -r ../temporal-analyze-linux-amd64.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: temporal-analyze-linux-amd64.zip
+          path: tools/temporal-analyze/temporal-analyze-linux-amd64.zip
           if-no-files-found: error
 
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build-macos, build-windows, build-linux]
     permissions:
       contents: write
 

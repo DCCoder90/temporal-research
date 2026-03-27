@@ -22,19 +22,25 @@ Given a `.pcap` file captured from a running Temporal cluster, `temporal-analyze
 
 ### Option A — Download a pre-built release (recommended)
 
-Pre-built CLI binaries are published automatically for every tagged release via GitHub Actions.
+Pre-built releases are published automatically for every tagged release via GitHub Actions.
 
-1. Go to the [Releases page](https://github.com/DCCoder90/temporal-research/releases) and download the binary for your platform:
+1. Go to the [Releases page](https://github.com/DCCoder90/temporal-research/releases) and download the archive for your platform:
 
-   | File | Platform |
-   |------|----------|
-   | `temporal-analyze-macos-arm64` | macOS — Apple Silicon (M1/M2/M3) |
-   | `temporal-analyze-macos-x86_64` | macOS — Intel |
-   | `temporal-analyze-linux-amd64` | Linux — 64-bit |
-   | `temporal-analyze-windows-amd64.exe` | Windows — 64-bit |
+   | File | Platform | Type |
+   |------|----------|------|
+   | `temporal-analyze-macos-universal.zip` | macOS — Apple Silicon + Intel | GUI + CLI |
+   | `temporal-analyze-windows-amd64.zip` | Windows — 64-bit | GUI + CLI |
+   | `temporal-analyze-linux-amd64.zip` | Linux — 64-bit | CLI only |
 
-2. Extract the archive. Each release zip contains two files:
+2. Extract the archive. Each zip contains:
 
+   **macOS:**
+   ```
+   temporal-analyze.app   (universal .app bundle — double-click to launch GUI)
+   config.json
+   ```
+
+   **Windows / Linux:**
    ```
    temporal-analyze   (or temporal-analyze.exe on Windows)
    config.json
@@ -49,6 +55,8 @@ Pre-built CLI binaries are published automatically for every tagged release via 
    On Windows, extract the zip and move both files to a folder on your `PATH`.
 
    > `config.json` must be present alongside the binary (or in `~/.config/temporal-analyze/`). The application will not start without it — see [Configuration files](#configuration-files).
+
+   > **macOS Gatekeeper:** the `.app` is not code-signed. The first time you open it, right-click → **Open** and confirm the prompt. Subsequent launches work normally.
 
 3. Install tshark (required at runtime):
 
@@ -66,8 +74,6 @@ Pre-built CLI binaries are published automatically for every tagged release via 
 
    tshark --version
    ```
-
-> **Note:** pre-built releases are CLI-only (`--tags nogui`). To use the GUI, build from source with Wails (see Option B).
 
 ---
 
