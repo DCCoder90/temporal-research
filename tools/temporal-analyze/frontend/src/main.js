@@ -4,7 +4,7 @@
 
 // Dynamic imports handle the case where wailsjs/ doesn't exist yet
 // (e.g., when loading directly in a browser for CSS preview).
-let Analyze, Export, OpenFileDialog, EventsOn;
+let Analyze, Export, OpenFileDialog, EventsOn, QueryDB;
 
 async function loadWailsBindings() {
   try {
@@ -12,6 +12,7 @@ async function loadWailsBindings() {
     Analyze = appModule.Analyze;
     Export = appModule.Export;
     OpenFileDialog = appModule.OpenFileDialog;
+    QueryDB = appModule.QueryDB;
     const runtime = await import('./wailsjs/runtime/runtime.js');
     EventsOn = runtime.EventsOn;
   } catch {
@@ -19,6 +20,7 @@ async function loadWailsBindings() {
     Analyze = async () => { throw new Error('Wails runtime not available'); };
     Export = async () => { throw new Error('Wails runtime not available'); };
     OpenFileDialog = async () => '';
+    QueryDB = async () => { throw new Error('Wails runtime not available'); };
     EventsOn = () => {};
   }
 }
@@ -27,7 +29,9 @@ async function loadWailsBindings() {
 let currentPcapPath = null;
 let currentResult = null;
 let panZoomInstances = [];
-let activeView = 'diagrams'; // 'diagrams' | 'stats'
+let activeView = 'diagrams'; // 'diagrams' | 'stats' | 'query'
+let queryEditor = null;      // CodeMirror instance
+let lastQueryResult = null;  // most recent QueryResult for CSV export
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const fileZone      = document.getElementById('file-zone');
@@ -45,6 +49,15 @@ const viewStats     = document.getElementById('view-stats');
 const statsContent  = document.getElementById('stats-content');
 const tabDiagrams   = document.getElementById('tab-diagrams');
 const tabStats      = document.getElementById('tab-stats');
+const tabQuery      = document.getElementById('tab-query');
+const viewQuery     = document.getElementById('view-query');
+const queryRunBtn   = document.getElementById('query-run-btn');
+const queryExportBtn = document.getElementById('query-export-btn');
+const queryStatus   = document.getElementById('query-status');
+const queryError    = document.getElementById('query-error');
+const queryResultsWrap = document.getElementById('query-results-wrap');
+const queryResultsMeta = document.getElementById('query-results-meta');
+const queryResultsTable = document.getElementById('query-results-table');
 
 // ── Mermaid setup ──────────────────────────────────────────────────────────
 mermaid.initialize({
@@ -57,13 +70,16 @@ mermaid.initialize({
 // ── Tab switching ──────────────────────────────────────────────────────────
 tabDiagrams.addEventListener('click', () => switchView('diagrams'));
 tabStats.addEventListener('click',    () => switchView('stats'));
+tabQuery.addEventListener('click',    () => switchView('query'));
 
 function switchView(view) {
   activeView = view;
   tabDiagrams.classList.toggle('active', view === 'diagrams');
   tabStats.classList.toggle('active',    view === 'stats');
+  tabQuery.classList.toggle('active',    view === 'query');
   viewDiagrams.hidden = view !== 'diagrams';
   viewStats.hidden    = view !== 'stats';
+  viewQuery.hidden    = view !== 'query';
 }
 
 // ── Filter panel logic ─────────────────────────────────────────────────────
@@ -307,10 +323,214 @@ function fmtBytes(n) {
   return `${f.toFixed(1)} TB`;
 }
 
+// ── Sample queries ─────────────────────────────────────────────────────────
+const SAMPLE_QUERIES = [
+  {
+    label: 'Packets by protocol',
+    sql: `SELECT protocol, COUNT(*) AS packets, SUM(bytes) AS total_bytes
+FROM packets
+GROUP BY protocol
+ORDER BY total_bytes DESC;`,
+  },
+  {
+    label: 'Top talkers by bytes (src)',
+    sql: `SELECT src, COUNT(*) AS packets, SUM(bytes) AS bytes
+FROM packets
+GROUP BY src
+ORDER BY bytes DESC
+LIMIT 20;`,
+  },
+  {
+    label: 'Packets per src/dst pair',
+    sql: `SELECT src, dst, protocol, COUNT(*) AS packets, SUM(bytes) AS bytes
+FROM packets
+GROUP BY src, dst, protocol
+ORDER BY bytes DESC;`,
+  },
+  {
+    label: 'gRPC call frequency',
+    sql: `SELECT method, COUNT(*) AS calls
+FROM grpc_calls
+GROUP BY method
+ORDER BY calls DESC;`,
+  },
+  {
+    label: 'gRPC calls by source',
+    sql: `SELECT src, method, COUNT(*) AS calls
+FROM grpc_calls
+GROUP BY src, method
+ORDER BY calls DESC;`,
+  },
+  {
+    label: 'gRPC calls by source + destination',
+    sql: `SELECT src, dst, method, COUNT(*) AS calls
+FROM grpc_calls
+GROUP BY src, dst, method
+ORDER BY calls DESC;`,
+  },
+  {
+    label: 'All packets (first 100)',
+    sql: `SELECT time, src, dst, src_port, dst_port, protocol, bytes
+FROM packets
+ORDER BY time
+LIMIT 100;`,
+  },
+  {
+    label: 'All gRPC calls',
+    sql: `SELECT time, src, dst, method
+FROM grpc_calls
+ORDER BY time;`,
+  },
+  {
+    label: 'JOIN: packets with gRPC method (time-proximity)',
+    sql: `SELECT p.time, p.src, p.dst, g.method, p.bytes
+FROM packets p
+JOIN grpc_calls g
+  ON p.src = g.src AND p.dst = g.dst
+  AND ABS(p.time - g.time) < 0.01
+ORDER BY p.time
+LIMIT 100;`,
+  },
+  {
+    label: 'Bytes per minute',
+    sql: `SELECT CAST(time / 60 AS INTEGER) * 60 AS minute_epoch,
+       COUNT(*) AS packets,
+       SUM(bytes) AS bytes
+FROM packets
+GROUP BY minute_epoch
+ORDER BY minute_epoch;`,
+  },
+];
+
+// ── Query tab ──────────────────────────────────────────────────────────────
+function initQueryTab() {
+  // Initialize CodeMirror SQL editor.
+  queryEditor = CodeMirror.fromTextArea(document.getElementById('query-editor'), {
+    mode: 'text/x-sql',
+    theme: 'default',
+    lineNumbers: true,
+    indentWithTabs: false,
+    tabSize: 2,
+    extraKeys: { 'Ctrl-Enter': runQuery, 'Cmd-Enter': runQuery },
+  });
+  queryEditor.setSize('100%', '180px');
+  queryEditor.setValue(SAMPLE_QUERIES[0].sql);
+
+  // Populate sample queries dropdown.
+  const sel = document.getElementById('query-samples');
+  SAMPLE_QUERIES.forEach((q, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = q.label;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => {
+    const idx = parseInt(sel.value, 10);
+    if (!isNaN(idx)) queryEditor.setValue(SAMPLE_QUERIES[idx].sql);
+    sel.value = '';
+  });
+
+  queryRunBtn.addEventListener('click', runQuery);
+  queryExportBtn.addEventListener('click', exportCSV);
+
+  // Help modal.
+  const backdrop = document.getElementById('query-help-backdrop');
+  document.getElementById('query-help-btn').addEventListener('click', () => { backdrop.hidden = false; });
+  document.getElementById('query-help-close').addEventListener('click', () => { backdrop.hidden = true; });
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') backdrop.hidden = true; });
+}
+
+async function runQuery() {
+  const sql = queryEditor.getValue().trim();
+  if (!sql) return;
+
+  queryRunBtn.disabled = true;
+  queryExportBtn.disabled = true;
+  queryStatus.textContent = 'Running…';
+  queryError.hidden = true;
+  queryResultsWrap.hidden = true;
+  lastQueryResult = null;
+
+  try {
+    const result = await QueryDB(sql);
+
+    if (result.SQLError) {
+      queryError.textContent = result.SQLError;
+      queryError.hidden = false;
+      queryStatus.textContent = 'Error';
+      return;
+    }
+
+    lastQueryResult = result;
+    renderQueryTable(result);
+    queryExportBtn.disabled = false;
+
+    let meta = `${fmtNum(result.RowCount)} row${result.RowCount !== 1 ? 's' : ''}`;
+    if (result.Truncated) meta += ' (truncated at 10,000 — refine your query)';
+    queryStatus.textContent = meta;
+  } catch (err) {
+    queryError.textContent = String(err);
+    queryError.hidden = false;
+    queryStatus.textContent = 'Error';
+  } finally {
+    queryRunBtn.disabled = false;
+  }
+}
+
+function renderQueryTable(result) {
+  if (!result.Columns || result.Columns.length === 0) {
+    queryResultsMeta.textContent = 'Query executed — no columns returned.';
+    queryResultsWrap.hidden = false;
+    return;
+  }
+
+  let html = '<thead><tr>';
+  result.Columns.forEach(c => { html += `<th>${escHtml(c)}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  (result.Rows || []).forEach(row => {
+    html += '<tr>';
+    row.forEach(cell => {
+      html += `<td>${cell === null ? '<span class="null-cell">NULL</span>' : escHtml(String(cell))}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody>';
+  queryResultsTable.innerHTML = html;
+  queryResultsWrap.hidden = false;
+}
+
+function exportCSV() {
+  if (!lastQueryResult) return;
+  const lines = [lastQueryResult.Columns.map(csvCell).join(',')];
+  (lastQueryResult.Rows || []).forEach(row => {
+    lines.push(row.map(v => csvCell(v === null ? '' : String(v))).join(','));
+  });
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'query_result.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(s) {
+  return (s.includes(',') || s.includes('"') || s.includes('\n'))
+    ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 (async () => {
   await loadWailsBindings();
   await setupWailsEvents();
   // Hide view toggle until first analysis completes.
   document.getElementById('view-toggle').hidden = true;
+  initQueryTab();
 })();

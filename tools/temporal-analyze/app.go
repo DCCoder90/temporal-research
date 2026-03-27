@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"temporal-analyze/internal/analysis"
 	"temporal-analyze/internal/config"
 	"temporal-analyze/internal/filter"
@@ -14,6 +16,7 @@ import (
 // App holds the Wails application state.
 type App struct {
 	ctx context.Context
+	db  *sql.DB // in-memory SQLite DB populated after each Analyze call
 }
 
 // NewApp creates a new App instance.
@@ -62,6 +65,15 @@ func (a *App) Analyze(pcapPath string, opts AnalysisOptions) (*AnalysisResult, e
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Rebuild the in-memory query DB for the new analysis result.
+	if a.db != nil {
+		a.db.Close()
+	}
+	a.db, err = populateDB(result)
+	if err != nil {
+		return nil, fmt.Errorf("building query DB: %w", err)
 	}
 
 	trafficSeq := ""

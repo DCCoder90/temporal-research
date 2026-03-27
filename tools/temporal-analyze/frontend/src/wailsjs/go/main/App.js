@@ -14,6 +14,10 @@ export function OpenFileDialog() {
   return window['go']['main']['App']['OpenFileDialog']();
 }
 
+export function QueryDB(arg1) {
+  return window['go']['main']['App']['QueryDB'](arg1);
+}
+
 export function ResolveIP(arg1) {
   return window['go']['main']['App']['ResolveIP'](arg1);
 }

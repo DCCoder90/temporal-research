@@ -50,6 +50,26 @@ export namespace main {
 	        this.StatsMarkdown = source["StatsMarkdown"];
 	    }
 	}
+	export class QueryResult {
+	    Columns: string[];
+	    Rows: any[][];
+	    RowCount: number;
+	    Truncated: boolean;
+	    SQLError: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Columns = source["Columns"];
+	        this.Rows = source["Rows"];
+	        this.RowCount = source["RowCount"];
+	        this.Truncated = source["Truncated"];
+	        this.SQLError = source["SQLError"];
+	    }
+	}
 
 }
 

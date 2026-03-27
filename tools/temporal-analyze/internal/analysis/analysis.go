@@ -34,9 +34,9 @@ type Result struct {
 	SeqDiagram    string
 	TrafficSeq    *string // nil when suppressed (grpc-only filter)
 	StatsMarkdown string  // same content written to _stats.md by the CLI
-	// Full slices retained for export.
-	packets   []tshark.Packet
-	grpcCalls []tshark.GRPCCall
+	// Full slices retained for export and querying.
+	Packets   []tshark.Packet
+	GRPCCalls []tshark.GRPCCall
 }
 
 // Run is the single entry point for both CLI and GUI.
@@ -107,8 +107,8 @@ func Run(pcapPath string, opts Options) (*Result, error) {
 		SeqDiagram:    seqDiagram,
 		TrafficSeq:    trafficSeq,
 		StatsMarkdown: statsMarkdown,
-		packets:       packets,
-		grpcCalls:     grpcCalls,
+		Packets:       packets,
+		GRPCCalls:     grpcCalls,
 	}, nil
 }
 
@@ -134,8 +134,8 @@ func WriteResult(pcapPath string, result *Result) ([]string, error) {
 	htmlContent := report.GenerateHTML(report.HTMLInput{
 		PcapName:    result.PcapName,
 		Duration:    result.Duration,
-		Packets:     result.packets,
-		GRPCCalls:   result.grpcCalls,
+		Packets:     result.Packets,
+		GRPCCalls:   result.GRPCCalls,
 		FlowDiagram: result.FlowDiagram,
 		SeqDiagram:  result.SeqDiagram,
 		TrafficSeq:  result.TrafficSeq,

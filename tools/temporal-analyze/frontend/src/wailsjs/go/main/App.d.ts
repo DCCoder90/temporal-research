@@ -8,4 +8,6 @@ export function Export(arg1:string,arg2:main.AnalysisOptions):Promise<Array<stri
 
 export function OpenFileDialog():Promise<string>;
 
+export function QueryDB(arg1:string):Promise<main.QueryResult>;
+
 export function ResolveIP(arg1:string):Promise<string>;

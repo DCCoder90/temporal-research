@@ -7,6 +7,9 @@
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.css">
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5/mode/sql/sql.js"></script>
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
@@ -57,6 +60,7 @@
       <div class="tab-row">
         <button id="tab-diagrams" class="tab-btn active">Diagrams</button>
         <button id="tab-stats" class="tab-btn">Statistics</button>
+        <button id="tab-query" class="tab-btn">Query</button>
       </div>
     </div>
 
@@ -149,10 +153,85 @@
       <div id="stats-content" class="stats-body"></div>
     </div>
 
+    <!-- ── Query view ──────────────────────────────────────────────────── -->
+    <div id="view-query" hidden>
+      <div id="query-toolbar">
+        <select id="query-samples" class="filter-input query-samples-select">
+          <option value="">— sample queries —</option>
+        </select>
+        <button id="query-run-btn" class="btn-primary query-run-btn">Run</button>
+        <button id="query-export-btn" class="query-export-btn" disabled>Export CSV</button>
+        <button id="query-help-btn" class="query-help-btn" title="Query help">?</button>
+        <span id="query-status" class="query-status"></span>
+      </div>
+      <div id="query-editor-wrap">
+        <textarea id="query-editor"></textarea>
+      </div>
+      <div id="query-error" class="error-card" hidden></div>
+      <div id="query-results-wrap" hidden>
+        <div id="query-results-meta"></div>
+        <div id="query-table-scroll">
+          <table id="query-results-table"></table>
+        </div>
+      </div>
+    </div>
+
     <div id="error-card" class="error-card" hidden>
       <strong>Analysis failed:</strong> <span id="error-msg"></span>
     </div>
   </main>
+
+  <!-- ── Query help modal ───────────────────────────────────────────── -->
+  <div id="query-help-backdrop" hidden>
+    <div id="query-help-modal" role="dialog" aria-modal="true" aria-label="Query Help">
+      <div id="query-help-header">
+        <span>Query Reference</span>
+        <button id="query-help-close" aria-label="Close">&times;</button>
+      </div>
+      <div id="query-help-body">
+        <h3>Tables</h3>
+        <table class="help-table">
+          <thead><tr><th>Table</th><th>Column</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="9"><code>packets</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
+            <tr><td><code>src_ip</code></td><td>TEXT</td><td>Source IP address</td></tr>
+            <tr><td><code>dst_ip</code></td><td>TEXT</td><td>Destination IP address</td></tr>
+            <tr><td><code>src</code></td><td>TEXT</td><td>Source container name</td></tr>
+            <tr><td><code>dst</code></td><td>TEXT</td><td>Destination container name</td></tr>
+            <tr><td><code>src_port</code></td><td>TEXT</td><td>Source TCP port</td></tr>
+            <tr><td><code>dst_port</code></td><td>TEXT</td><td>Destination TCP port</td></tr>
+            <tr><td><code>protocol</code></td><td>TEXT</td><td>Protocol (TCP, HTTP2, PGSQL…)</td></tr>
+            <tr><td><code>bytes</code></td><td>INTEGER</td><td>Frame size in bytes</td></tr>
+            <tr><td rowspan="4"><code>grpc_calls</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
+            <tr><td><code>src</code></td><td>TEXT</td><td>Calling service name</td></tr>
+            <tr><td><code>dst</code></td><td>TEXT</td><td>Target service name</td></tr>
+            <tr><td><code>method</code></td><td>TEXT</td><td>gRPC method name</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Syntax examples</h3>
+        <pre><code>-- Aggregate
+SELECT protocol, COUNT(*) AS n, SUM(bytes) AS total
+FROM packets
+GROUP BY protocol
+ORDER BY total DESC;
+
+-- Filter
+SELECT * FROM grpc_calls
+WHERE src = 'hello-world-worker'
+  AND method LIKE '%Workflow%';
+
+-- Join tables
+SELECT p.time, p.src, g.method
+FROM packets p
+JOIN grpc_calls g ON p.src = g.src
+  AND ABS(p.time - g.time) &lt; 0.01
+LIMIT 50;</code></pre>
+
+        <p class="help-hint">Full SQLite SQL is supported — <code>WHERE</code>, <code>GROUP BY</code>, <code>HAVING</code>, <code>ORDER BY</code>, <code>JOIN</code>, <code>LIMIT</code>, window functions, and all built-in functions. Ctrl+Enter runs the query.</p>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
