@@ -10,21 +10,31 @@ import (
 
 // Packet represents a single IP packet from the capture.
 type Packet struct {
-	T     float64
-	Src   string
-	Dst   string
-	Sport string
-	Dport string
-	Len   int
-	Proto string
+	T          float64
+	Src        string
+	Dst        string
+	Sport      string
+	Dport      string
+	Len        int     // frame.len — total frame bytes including headers
+	Proto      string
+	TCPStream  int     // tcp.stream index; -1 if not TCP
+	TCPLen     int     // tcp.len — payload bytes only; 0 if not TCP
+	TCPFlags   int     // tcp.flags as integer (e.g. 0x002 = SYN); 0 if not TCP
+	Retransmit bool    // tcp.analysis.retransmission
+	RTT        float64 // tcp.analysis.ack_rtt in seconds; 0 if not available
 }
 
 // GRPCCall represents a decoded gRPC method call.
 type GRPCCall struct {
-	T      float64
-	Src    string // resolved container name
-	Dst    string // resolved container name
-	Method string // last path segment of the :path header
+	T          float64
+	Src        string // resolved container name
+	Dst        string // resolved container name
+	FullPath   string // full :path value e.g. /temporal.api.workflowservice.v1.WorkflowService/PollWorkflowTaskQueue
+	Service    string // service portion e.g. temporal.api.workflowservice.v1.WorkflowService
+	Method     string // last path segment e.g. PollWorkflowTaskQueue
+	TCPStream  int    // tcp.stream index
+	StreamID   int    // HTTP/2 stream ID
+	StatusCode int    // gRPC status code (0=OK); -1 if unknown
 }
 
 // RunTshark executes tshark and returns tab-separated field rows.
@@ -78,6 +88,11 @@ func ExtractPackets(pcap string) ([]Packet, float64, error) {
 		"tcp.dstport",
 		"frame.len",
 		"_ws.col.Protocol",
+		"tcp.stream",
+		"tcp.len",
+		"tcp.flags",
+		"tcp.analysis.retransmission",
+		"tcp.analysis.ack_rtt",
 	}
 	rows, err := RunTshark(pcap, fields, nil, "")
 	if err != nil {
@@ -86,23 +101,31 @@ func ExtractPackets(pcap string) ([]Packet, float64, error) {
 
 	var packets []Packet
 	for _, row := range rows {
-		timeS, src, dst, sport, dport, length, proto := row[0], row[1], row[2], row[3], row[4], row[5], row[6]
+		src, dst := row[1], row[2]
 		if src == "" || dst == "" {
 			continue
 		}
-		t, err := strconv.ParseFloat(timeS, 64)
+		t, err := strconv.ParseFloat(row[0], 64)
 		if err != nil {
 			continue
 		}
-		l, _ := strconv.Atoi(length)
+		tcpStream := -1
+		if row[7] != "" {
+			tcpStream = parseInt(row[7])
+		}
 		packets = append(packets, Packet{
-			T:     t,
-			Src:   src,
-			Dst:   dst,
-			Sport: sport,
-			Dport: dport,
-			Len:   l,
-			Proto: proto,
+			T:          t,
+			Src:        src,
+			Dst:        dst,
+			Sport:      row[3],
+			Dport:      row[4],
+			Len:        parseInt(row[5]),
+			Proto:      row[6],
+			TCPStream:  tcpStream,
+			TCPLen:     parseInt(row[8]),
+			TCPFlags:   parseHexInt(row[9]),
+			Retransmit: row[10] == "1",
+			RTT:        parseFloat(row[11]),
 		})
 	}
 
@@ -125,7 +148,14 @@ func ExtractPackets(pcap string) ([]Packet, float64, error) {
 // ExtractGRPCCalls returns decoded gRPC method calls from HTTP/2 HEADERS frames.
 // Uses -d tcp.port==PORT,http2 overrides for all Temporal gRPC ports.
 func ExtractGRPCCalls(pcap string) ([]GRPCCall, error) {
-	fields := []string{"frame.time_epoch", "ip.src", "ip.dst", "http2.headers.path"}
+	fields := []string{
+		"frame.time_epoch",
+		"ip.src",
+		"ip.dst",
+		"http2.headers.path",
+		"tcp.stream",
+		"http2.streamid",
+	}
 
 	// Build decode-as args for all gRPC ports.
 	var decodeArgs []string
@@ -141,23 +171,101 @@ func ExtractGRPCCalls(pcap string) ([]GRPCCall, error) {
 
 	var calls []GRPCCall
 	for _, row := range rows {
-		timeS, src, dst, path := row[0], row[1], row[2], row[3]
+		path := row[3]
 		if path == "" {
 			continue
 		}
-		t, err := strconv.ParseFloat(timeS, 64)
+		t, err := strconv.ParseFloat(row[0], 64)
 		if err != nil {
 			continue
 		}
-		// Last segment of path is the method name.
-		parts := strings.Split(path, "/")
+
+		// Derive service and method from path e.g. /pkg.ServiceName/MethodName
+		parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 		method := parts[len(parts)-1]
+		service := ""
+		if len(parts) >= 2 {
+			service = parts[len(parts)-2]
+		}
+
 		calls = append(calls, GRPCCall{
-			T:      t,
-			Src:    config.Resolve(src),
-			Dst:    config.Resolve(dst),
-			Method: method,
+			T:         t,
+			Src:       config.Resolve(row[1]),
+			Dst:       config.Resolve(row[2]),
+			FullPath:  path,
+			Service:   service,
+			Method:    method,
+			TCPStream: parseInt(row[4]),
+			StreamID:  parseInt(firstVal(row[5])),
+			StatusCode: -1, // filled in below
 		})
 	}
+
+	// Best-effort: join gRPC status codes from response trailer frames.
+	statusMap := extractGRPCStatuses(pcap, decodeArgs)
+	for i := range calls {
+		key := fmt.Sprintf("%d:%d", calls[i].TCPStream, calls[i].StreamID)
+		if code, ok := statusMap[key]; ok {
+			calls[i].StatusCode = code
+		}
+	}
+
 	return calls, nil
+}
+
+// extractGRPCStatuses returns a map of "tcpStream:streamID" -> gRPC status code
+// by extracting frames that carry grpc.status_code. Best-effort: returns empty
+// map on any error so the caller degrades gracefully.
+func extractGRPCStatuses(pcap string, decodeArgs []string) map[string]int {
+	result := make(map[string]int)
+
+	fields := []string{"tcp.stream", "http2.streamid", "grpc.status_code"}
+	rows, err := RunTshark(pcap, fields, decodeArgs, "grpc.status_code")
+	if err != nil {
+		return result
+	}
+
+	for _, row := range rows {
+		tcpStream := row[0]
+		streamID := firstVal(row[1])
+		statusStr := row[2]
+		if tcpStream == "" || streamID == "" || statusStr == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s:%s", tcpStream, streamID)
+		result[key] = parseInt(statusStr)
+	}
+	return result
+}
+
+// ── Parsing helpers ──────────────────────────────────────────────────────────
+
+func parseInt(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
+}
+
+func parseFloat(s string) float64 {
+	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	return f
+}
+
+// parseHexInt parses a tshark hex flag value like "0x00000002" → 2.
+func parseHexInt(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	s = strings.TrimPrefix(s, "0x")
+	n, _ := strconv.ParseInt(s, 16, 64)
+	return int(n)
+}
+
+// firstVal returns the first comma-separated value from a tshark field that
+// may contain multiple values (e.g. http2.streamid on a reassembled frame).
+func firstVal(s string) string {
+	if idx := strings.IndexByte(s, ','); idx >= 0 {
+		return s[:idx]
+	}
+	return s
 }

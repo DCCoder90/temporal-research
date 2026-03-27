@@ -54,21 +54,31 @@ func populateDB(result *analysis.Result) (*sql.DB, error) {
 func createSchema(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE packets (
-			time     REAL,
-			src_ip   TEXT,
-			dst_ip   TEXT,
-			src      TEXT,
-			dst      TEXT,
-			src_port TEXT,
-			dst_port TEXT,
-			protocol TEXT,
-			bytes    INTEGER
+			time        REAL,
+			src_ip      TEXT,
+			dst_ip      TEXT,
+			src         TEXT,
+			dst         TEXT,
+			src_port    TEXT,
+			dst_port    TEXT,
+			protocol    TEXT,
+			bytes       INTEGER,
+			tcp_stream  INTEGER,
+			tcp_len     INTEGER,
+			tcp_flags   INTEGER,
+			retransmit  INTEGER,
+			rtt         REAL
 		);
 		CREATE TABLE grpc_calls (
-			time   REAL,
-			src    TEXT,
-			dst    TEXT,
-			method TEXT
+			time        REAL,
+			src         TEXT,
+			dst         TEXT,
+			full_path   TEXT,
+			service     TEXT,
+			method      TEXT,
+			tcp_stream  INTEGER,
+			stream_id   INTEGER,
+			status_code INTEGER
 		);
 	`)
 	return err
@@ -79,7 +89,7 @@ func insertPackets(db *sql.DB, result *analysis.Result) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO packets VALUES (?,?,?,?,?,?,?,?,?)`)
+	stmt, err := tx.Prepare(`INSERT INTO packets VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -87,6 +97,10 @@ func insertPackets(db *sql.DB, result *analysis.Result) error {
 	defer stmt.Close()
 
 	for _, p := range result.Packets {
+		retransmit := 0
+		if p.Retransmit {
+			retransmit = 1
+		}
 		_, err = stmt.Exec(
 			p.T,
 			p.Src,
@@ -97,6 +111,11 @@ func insertPackets(db *sql.DB, result *analysis.Result) error {
 			p.Dport,
 			p.Proto,
 			p.Len,
+			p.TCPStream,
+			p.TCPLen,
+			p.TCPFlags,
+			retransmit,
+			p.RTT,
 		)
 		if err != nil {
 			tx.Rollback()
@@ -114,7 +133,7 @@ func insertGRPCCalls(db *sql.DB, result *analysis.Result) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO grpc_calls VALUES (?,?,?,?)`)
+	stmt, err := tx.Prepare(`INSERT INTO grpc_calls VALUES (?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -122,7 +141,7 @@ func insertGRPCCalls(db *sql.DB, result *analysis.Result) error {
 	defer stmt.Close()
 
 	for _, c := range result.GRPCCalls {
-		_, err = stmt.Exec(c.T, c.Src, c.Dst, c.Method)
+		_, err = stmt.Exec(c.T, c.Src, c.Dst, c.FullPath, c.Service, c.Method, c.TCPStream, c.StreamID, c.StatusCode)
 		if err != nil {
 			tx.Rollback()
 			return err

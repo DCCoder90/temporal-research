@@ -428,6 +428,8 @@ body {
   padding-bottom: 2rem;
 }
 
+#view-query[hidden] { display: none; }
+
 #query-toolbar {
   display: flex;
   align-items: center;
@@ -570,8 +572,8 @@ body {
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: 0 8px 32px rgba(0,0,0,.25);
-  width: min(680px, 92vw);
-  max-height: 80vh;
+  width: min(720px, 92vw);
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -651,6 +653,8 @@ body {
   font-family: "SF Mono", "Fira Code", monospace;
   font-size: .8rem;
   line-height: 1.55;
+  min-height: 180px;
+  flex-shrink: 0;
 }
 
 #query-help-body code {

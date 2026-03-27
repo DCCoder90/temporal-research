@@ -382,14 +382,36 @@ FROM grpc_calls
 ORDER BY time;`,
   },
   {
-    label: 'JOIN: packets with gRPC method (time-proximity)',
+    label: 'JOIN: packets with gRPC method (via tcp_stream)',
     sql: `SELECT p.time, p.src, p.dst, g.method, p.bytes
 FROM packets p
-JOIN grpc_calls g
-  ON p.src = g.src AND p.dst = g.dst
-  AND ABS(p.time - g.time) < 0.01
+JOIN grpc_calls g ON p.tcp_stream = g.tcp_stream
 ORDER BY p.time
 LIMIT 100;`,
+  },
+  {
+    label: 'Failed gRPC calls (status != 0)',
+    sql: `SELECT src, dst, method, status_code, COUNT(*) AS n
+FROM grpc_calls
+WHERE status_code > 0
+GROUP BY src, dst, method, status_code
+ORDER BY n DESC;`,
+  },
+  {
+    label: 'Retransmitted packets',
+    sql: `SELECT src, dst, protocol, COUNT(*) AS retransmits
+FROM packets
+WHERE retransmit = 1
+GROUP BY src, dst, protocol
+ORDER BY retransmits DESC;`,
+  },
+  {
+    label: 'Average RTT by src/dst',
+    sql: `SELECT src, dst, ROUND(AVG(rtt) * 1000, 3) AS avg_rtt_ms, COUNT(*) AS samples
+FROM packets
+WHERE rtt > 0
+GROUP BY src, dst
+ORDER BY avg_rtt_ms DESC;`,
   },
   {
     label: 'Bytes per minute',
@@ -399,6 +421,13 @@ LIMIT 100;`,
 FROM packets
 GROUP BY minute_epoch
 ORDER BY minute_epoch;`,
+  },
+  {
+    label: 'gRPC calls by service',
+    sql: `SELECT service, method, COUNT(*) AS calls
+FROM grpc_calls
+GROUP BY service, method
+ORDER BY calls DESC;`,
   },
 ];
 

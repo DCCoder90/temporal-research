@@ -193,7 +193,7 @@
         <table class="help-table">
           <thead><tr><th>Table</th><th>Column</th><th>Type</th><th>Description</th></tr></thead>
           <tbody>
-            <tr><td rowspan="9"><code>packets</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
+            <tr><td rowspan="14"><code>packets</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
             <tr><td><code>src_ip</code></td><td>TEXT</td><td>Source IP address</td></tr>
             <tr><td><code>dst_ip</code></td><td>TEXT</td><td>Destination IP address</td></tr>
             <tr><td><code>src</code></td><td>TEXT</td><td>Source container name</td></tr>
@@ -201,11 +201,21 @@
             <tr><td><code>src_port</code></td><td>TEXT</td><td>Source TCP port</td></tr>
             <tr><td><code>dst_port</code></td><td>TEXT</td><td>Destination TCP port</td></tr>
             <tr><td><code>protocol</code></td><td>TEXT</td><td>Protocol (TCP, HTTP2, PGSQL…)</td></tr>
-            <tr><td><code>bytes</code></td><td>INTEGER</td><td>Frame size in bytes</td></tr>
-            <tr><td rowspan="4"><code>grpc_calls</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
+            <tr><td><code>bytes</code></td><td>INTEGER</td><td>Total frame size in bytes</td></tr>
+            <tr><td><code>tcp_stream</code></td><td>INTEGER</td><td>TCP stream index (-1 if not TCP)</td></tr>
+            <tr><td><code>tcp_len</code></td><td>INTEGER</td><td>TCP payload bytes (0 if not TCP)</td></tr>
+            <tr><td><code>tcp_flags</code></td><td>INTEGER</td><td>TCP flags as integer — use bitwise &amp; (e.g. <code>tcp_flags &amp; 2</code> = SYN)</td></tr>
+            <tr><td><code>retransmit</code></td><td>INTEGER</td><td>1 if tshark detected a retransmission, 0 otherwise</td></tr>
+            <tr><td><code>rtt</code></td><td>REAL</td><td>TCP ACK round-trip time in seconds (0 if unavailable)</td></tr>
+            <tr><td rowspan="9"><code>grpc_calls</code></td><td><code>time</code></td><td>REAL</td><td>Unix epoch timestamp</td></tr>
             <tr><td><code>src</code></td><td>TEXT</td><td>Calling service name</td></tr>
             <tr><td><code>dst</code></td><td>TEXT</td><td>Target service name</td></tr>
+            <tr><td><code>full_path</code></td><td>TEXT</td><td>Full gRPC :path e.g. <code>/pkg.Service/Method</code></td></tr>
+            <tr><td><code>service</code></td><td>TEXT</td><td>Service name portion of the path</td></tr>
             <tr><td><code>method</code></td><td>TEXT</td><td>gRPC method name</td></tr>
+            <tr><td><code>tcp_stream</code></td><td>INTEGER</td><td>TCP stream index (links to packets table)</td></tr>
+            <tr><td><code>stream_id</code></td><td>INTEGER</td><td>HTTP/2 stream ID within the TCP connection</td></tr>
+            <tr><td><code>status_code</code></td><td>INTEGER</td><td>gRPC status code (0=OK, non-zero=error, -1=unknown)</td></tr>
           </tbody>
         </table>
 
