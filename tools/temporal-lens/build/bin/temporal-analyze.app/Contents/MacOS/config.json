@@ -1,0 +1,38 @@
+{
+  "hosts": {
+    "172.20.0.10": "postgresql",
+    "172.20.0.21": "temporal-frontend",
+    "172.20.0.22": "temporal-history",
+    "172.20.0.23": "temporal-matching",
+    "172.20.0.24": "temporal-internal-worker",
+    "172.20.0.30": "temporal-ui",
+    "172.20.0.40": "hello-world-worker",
+    "172.20.0.41": "hello-world-starter",
+    "172.20.0.42": "scheduled-worker",
+    "172.20.0.43": "signals-worker",
+    "172.20.0.44": "child-workflows-worker",
+    "172.20.0.45": "retries-worker",
+    "172.20.0.46": "saga-worker",
+    "172.20.0.50": "wireshark",
+    "172.20.0.51": "scheduled-starter",
+    "172.20.0.52": "signals-starter",
+    "172.20.0.53": "signals-approve",
+    "172.20.0.54": "signals-reject",
+    "172.20.0.55": "child-workflows-starter",
+    "172.20.0.56": "retries-starter",
+    "172.20.0.57": "saga-starter",
+    "172.20.0.58": "saga-fail-starter"
+  },
+  "ports": {
+    "7233": "Temporal gRPC (frontend)",
+    "7234": "Temporal gRPC (history)",
+    "7235": "Temporal gRPC (matching)",
+    "7239": "Temporal gRPC (worker)",
+    "6933": "Temporal membership (frontend)",
+    "6934": "Temporal membership (history)",
+    "6935": "Temporal membership (matching)",
+    "6939": "Temporal membership (worker)",
+    "5432": "PostgreSQL",
+    "8080": "HTTP (Temporal UI)"
+  }
+}
