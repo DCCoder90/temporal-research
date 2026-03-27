@@ -1,4 +1,4 @@
-// main.js — Temporal Analyze GUI
+// main.js — Temporal Lens GUI
 // Wails auto-generates wailsjs/ in this directory at build time.
 // During development (wails dev), the bindings are available at runtime.
 
