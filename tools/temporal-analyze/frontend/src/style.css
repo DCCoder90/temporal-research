@@ -536,6 +536,14 @@ body {
 #query-results-table tr:nth-child(even) td { background: #fafbff; }
 #query-results-table tr:hover td { background: #f0f4ff; }
 
+#query-results-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+#query-results-table th.sortable:hover { background: #e4e6f4; }
+#query-results-table th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
+#query-results-table th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+
 .null-cell { color: #aaa; font-style: italic; }
 
 .query-help-btn {

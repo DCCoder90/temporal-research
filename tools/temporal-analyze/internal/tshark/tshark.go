@@ -10,31 +10,31 @@ import (
 
 // Packet represents a single IP packet from the capture.
 type Packet struct {
-	T          float64
-	Src        string
-	Dst        string
-	Sport      string
-	Dport      string
-	Len        int     // frame.len — total frame bytes including headers
-	Proto      string
-	TCPStream  int     // tcp.stream index; -1 if not TCP
-	TCPLen     int     // tcp.len — payload bytes only; 0 if not TCP
-	TCPFlags   int     // tcp.flags as integer (e.g. 0x002 = SYN); 0 if not TCP
-	Retransmit bool    // tcp.analysis.retransmission
-	RTT        float64 // tcp.analysis.ack_rtt in seconds; 0 if not available
+	T          float64 `json:"time"`
+	Src        string  `json:"src_ip"`
+	Dst        string  `json:"dst_ip"`
+	Sport      string  `json:"src_port"`
+	Dport      string  `json:"dst_port"`
+	Len        int     `json:"bytes"`        // frame.len — total frame bytes including headers
+	Proto      string  `json:"protocol"`
+	TCPStream  int     `json:"tcp_stream"`   // tcp.stream index; -1 if not TCP
+	TCPLen     int     `json:"tcp_len"`      // tcp.len — payload bytes only; 0 if not TCP
+	TCPFlags   int     `json:"tcp_flags"`    // tcp.flags as integer (e.g. 0x002 = SYN); 0 if not TCP
+	Retransmit bool    `json:"retransmit"`   // tcp.analysis.retransmission
+	RTT        float64 `json:"rtt"`          // tcp.analysis.ack_rtt in seconds; 0 if not available
 }
 
 // GRPCCall represents a decoded gRPC method call.
 type GRPCCall struct {
-	T          float64
-	Src        string // resolved container name
-	Dst        string // resolved container name
-	FullPath   string // full :path value e.g. /temporal.api.workflowservice.v1.WorkflowService/PollWorkflowTaskQueue
-	Service    string // service portion e.g. temporal.api.workflowservice.v1.WorkflowService
-	Method     string // last path segment e.g. PollWorkflowTaskQueue
-	TCPStream  int    // tcp.stream index
-	StreamID   int    // HTTP/2 stream ID
-	StatusCode int    // gRPC status code (0=OK); -1 if unknown
+	T          float64 `json:"time"`
+	Src        string  `json:"src"`        // resolved container name
+	Dst        string  `json:"dst"`        // resolved container name
+	FullPath   string  `json:"full_path"`  // full :path value e.g. /temporal.api.workflowservice.v1.WorkflowService/PollWorkflowTaskQueue
+	Service    string  `json:"service"`    // service portion e.g. temporal.api.workflowservice.v1.WorkflowService
+	Method     string  `json:"method"`     // last path segment e.g. PollWorkflowTaskQueue
+	TCPStream  int     `json:"tcp_stream"` // tcp.stream index
+	StreamID   int     `json:"stream_id"`  // HTTP/2 stream ID
+	StatusCode int     `json:"status_code"` // gRPC status code (0=OK); -1 if unknown
 }
 
 // RunTshark executes tshark and returns tab-separated field rows.

@@ -35,6 +35,10 @@ let lastQueryResult = null;  // most recent QueryResult for CSV export
 let grpcDiagrams = [];       // all gRPC sequence diagram pages
 let grpcPage = 0;            // current page index
 let grpcPanZoomIdx = -1;     // index into panZoomInstances for the gRPC diagram
+let queryHistory = [];       // ring-buffer of recent SQL queries (most recent first)
+let queryHistoryIdx = -1;    // -1 = not navigating history
+let queryDraft = '';         // unsaved editor content while navigating history
+let sortState = { col: -1, dir: 1 }; // current column sort for query results
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const fileZone      = document.getElementById('file-zone');
@@ -294,8 +298,11 @@ async function renderResult(result) {
     panZoomInstances.push(instance);
   });
 
-  // The gRPC diagram is always the last rendered SVG.
-  grpcPanZoomIdx = panZoomInstances.length - 1;
+  // Find the gRPC pan-zoom instance by element position, not array length,
+  // so the index is correct whether or not the traffic diagram is visible.
+  const allSvgs = [...document.querySelectorAll('.diagram-wrap .mermaid svg')];
+  const grpcSvg = document.querySelector('#mermaid-grpc svg');
+  grpcPanZoomIdx = grpcSvg ? allSvgs.indexOf(grpcSvg) : panZoomInstances.length - 1;
 }
 
 // ── gRPC diagram page navigation ───────────────────────────────────────────
@@ -492,8 +499,47 @@ ORDER BY calls DESC;`,
   },
 ];
 
+// ── Query history ──────────────────────────────────────────────────────────
+const HISTORY_KEY = 'temporal-analyze:query-history';
+const HISTORY_MAX = 10;
+
+function loadQueryHistory() {
+  try {
+    const saved = localStorage.getItem(HISTORY_KEY);
+    if (saved) queryHistory = JSON.parse(saved);
+  } catch {}
+}
+
+function saveToQueryHistory(sql) {
+  queryHistory = queryHistory.filter(s => s !== sql);
+  queryHistory.unshift(sql);
+  if (queryHistory.length > HISTORY_MAX) queryHistory.length = HISTORY_MAX;
+  queryHistoryIdx = -1;
+  queryDraft = '';
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(queryHistory)); } catch {}
+}
+
+function navigateHistoryUp() {
+  if (queryHistory.length === 0) return CodeMirror.Pass;
+  if (queryHistoryIdx === -1) queryDraft = queryEditor.getValue();
+  if (queryHistoryIdx < queryHistory.length - 1) {
+    queryHistoryIdx++;
+    queryEditor.setValue(queryHistory[queryHistoryIdx]);
+    queryEditor.setCursor(queryEditor.lastLine(), 0);
+  }
+}
+
+function navigateHistoryDown() {
+  if (queryHistoryIdx === -1) return CodeMirror.Pass;
+  queryHistoryIdx--;
+  queryEditor.setValue(queryHistoryIdx === -1 ? queryDraft : queryHistory[queryHistoryIdx]);
+  queryEditor.setCursor(queryEditor.lastLine(), 0);
+}
+
 // ── Query tab ──────────────────────────────────────────────────────────────
 function initQueryTab() {
+  loadQueryHistory();
+
   // Initialize CodeMirror SQL editor.
   queryEditor = CodeMirror.fromTextArea(document.getElementById('query-editor'), {
     mode: 'text/x-sql',
@@ -501,7 +547,12 @@ function initQueryTab() {
     lineNumbers: true,
     indentWithTabs: false,
     tabSize: 2,
-    extraKeys: { 'Ctrl-Enter': runQuery, 'Cmd-Enter': runQuery },
+    extraKeys: {
+      'Ctrl-Enter': runQuery,
+      'Cmd-Enter':  runQuery,
+      'Ctrl-Up':    navigateHistoryUp,
+      'Ctrl-Down':  navigateHistoryDown,
+    },
   });
   queryEditor.setSize('100%', '180px');
   queryEditor.setValue(SAMPLE_QUERIES[0].sql);
@@ -535,6 +586,7 @@ async function runQuery() {
   const sql = queryEditor.getValue().trim();
   if (!sql) return;
 
+  saveToQueryHistory(sql);
   queryRunBtn.disabled = true;
   queryExportBtn.disabled = true;
   queryStatus.textContent = 'Running…';
@@ -569,6 +621,8 @@ async function runQuery() {
 }
 
 function renderQueryTable(result) {
+  sortState = { col: -1, dir: 1 };
+
   if (!result.Columns || result.Columns.length === 0) {
     queryResultsMeta.textContent = 'Query executed — no columns returned.';
     queryResultsWrap.hidden = false;
@@ -576,20 +630,51 @@ function renderQueryTable(result) {
   }
 
   let html = '<thead><tr>';
-  result.Columns.forEach(c => { html += `<th>${escHtml(c)}</th>`; });
-  html += '</tr></thead><tbody>';
+  result.Columns.forEach((c, i) => {
+    html += `<th class="sortable" data-col="${i}">${escHtml(c)}</th>`;
+  });
+  html += '</tr></thead><tbody></tbody>';
+  queryResultsTable.innerHTML = html;
 
-  (result.Rows || []).forEach(row => {
-    html += '<tr>';
-    row.forEach(cell => {
-      html += `<td>${cell === null ? '<span class="null-cell">NULL</span>' : escHtml(String(cell))}</td>`;
-    });
-    html += '</tr>';
+  queryResultsTable.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => applySortColumn(parseInt(th.dataset.col, 10)));
   });
 
-  html += '</tbody>';
-  queryResultsTable.innerHTML = html;
+  renderTableRows(result.Rows || []);
   queryResultsWrap.hidden = false;
+}
+
+function applySortColumn(col) {
+  if (sortState.col === col) {
+    sortState.dir *= -1;
+  } else {
+    sortState.col = col;
+    sortState.dir = 1;
+  }
+  queryResultsTable.querySelectorAll('th').forEach((th, i) => {
+    th.classList.toggle('sort-asc',  i === col && sortState.dir === 1);
+    th.classList.toggle('sort-desc', i === col && sortState.dir === -1);
+  });
+  const rows = [...(lastQueryResult?.Rows || [])];
+  rows.sort((a, b) => {
+    const va = a[col], vb = b[col];
+    if (va === null && vb === null) return 0;
+    if (va === null) return sortState.dir;
+    if (vb === null) return -sortState.dir;
+    if (typeof va === 'number' && typeof vb === 'number') return sortState.dir * (va - vb);
+    return sortState.dir * String(va).localeCompare(String(vb));
+  });
+  renderTableRows(rows);
+}
+
+function renderTableRows(rows) {
+  const tbody = queryResultsTable.querySelector('tbody');
+  if (!tbody) return;
+  tbody.innerHTML = rows.map(row =>
+    '<tr>' + row.map(cell =>
+      `<td>${cell === null ? '<span class="null-cell">NULL</span>' : escHtml(String(cell))}</td>`
+    ).join('') + '</tr>'
+  ).join('');
 }
 
 function exportCSV() {

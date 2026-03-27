@@ -80,6 +80,15 @@ func createSchema(db *sql.DB) error {
 			stream_id   INTEGER,
 			status_code INTEGER
 		);
+		CREATE INDEX idx_packets_src      ON packets(src);
+		CREATE INDEX idx_packets_dst      ON packets(dst);
+		CREATE INDEX idx_packets_protocol ON packets(protocol);
+		CREATE INDEX idx_packets_time     ON packets(time);
+		CREATE INDEX idx_packets_stream   ON packets(tcp_stream);
+		CREATE INDEX idx_grpc_src         ON grpc_calls(src);
+		CREATE INDEX idx_grpc_method      ON grpc_calls(method);
+		CREATE INDEX idx_grpc_time        ON grpc_calls(time);
+		CREATE INDEX idx_grpc_stream      ON grpc_calls(tcp_stream);
 	`)
 	return err
 }

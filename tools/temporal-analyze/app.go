@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"temporal-analyze/internal/analysis"
 	"temporal-analyze/internal/config"
@@ -15,8 +16,10 @@ import (
 
 // App holds the Wails application state.
 type App struct {
-	ctx context.Context
-	db  *sql.DB // in-memory SQLite DB populated after each Analyze call
+	ctx          context.Context
+	db           *sql.DB          // in-memory SQLite DB populated after each Analyze call
+	lastResult   *analysis.Result // cached from last Analyze call; used by Export
+	lastPcapPath string           // pcap path that produced lastResult
 }
 
 // NewApp creates a new App instance.
@@ -64,8 +67,15 @@ func (a *App) Analyze(pcapPath string, opts AnalysisOptions) (*AnalysisResult, e
 		},
 	})
 	if err != nil {
+		if errors.Is(err, analysis.ErrNoPacketsAfterFilter) {
+			return nil, fmt.Errorf("no packets matched your filter — try relaxing it")
+		}
 		return nil, err
 	}
+
+	// Cache result for Export to reuse without re-running tshark.
+	a.lastResult = result
+	a.lastPcapPath = pcapPath
 
 	// Rebuild the in-memory query DB for the new analysis result.
 	if a.db != nil {
@@ -96,8 +106,13 @@ func (a *App) Analyze(pcapPath string, opts AnalysisOptions) (*AnalysisResult, e
 }
 
 // Export writes the HTML and Markdown report files adjacent to the pcap.
-// Returns the two output file paths.
+// Reuses the cached analysis result from the last Analyze call if the pcap
+// path matches, avoiding a second tshark pass. Falls back to re-running
+// analysis if the paths differ.
 func (a *App) Export(pcapPath string, opts AnalysisOptions) ([]string, error) {
+	if a.lastResult != nil && a.lastPcapPath == pcapPath {
+		return analysis.WriteResult(pcapPath, a.lastResult)
+	}
 	return analysis.Export(pcapPath, analysis.Options{
 		Filter: filter.FilterOptions{
 			Only:           opts.Only,

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -8,9 +9,12 @@ import (
 	"temporal-analyze/internal/analysis"
 	"temporal-analyze/internal/config"
 	"temporal-analyze/internal/filter"
+	"temporal-analyze/internal/tshark"
 
 	"github.com/spf13/cobra"
 )
+
+const version = "1.0.0"
 
 // Run is the CLI entry point. Called from both main.go (!nogui) and main_nogui.go (nogui).
 func Run(args []string) {
@@ -24,24 +28,31 @@ func Run(args []string) {
 
 func buildCommand() *cobra.Command {
 	var only, exclude, onlyHost, excludeHost string
-	var noInterservice bool
+	var noInterservice, quiet, jsonOut bool
 
 	cmd := &cobra.Command{
-		Use:   "temporal-analyze <pcap-file>",
-		Short: "Analyze a Temporal .pcap capture and produce flow diagrams and statistics.",
-		Long:  longDesc,
-		Args:  cobra.ExactArgs(1),
+		Use:     "temporal-analyze <pcap-file>",
+		Short:   "Analyze a Temporal .pcap capture and produce flow diagrams and statistics.",
+		Long:    longDesc,
+		Version: version,
+		Args:    cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := buildOptions(only, exclude, onlyHost, excludeHost, noInterservice)
 
-			filterDesc := filter.Describe(opts.Filter)
-			fmt.Fprintf(os.Stderr, "Analyzing %s ...\n", args[0])
-			if filterDesc != "" {
-				fmt.Fprintf(os.Stderr, "  Filter: %s\n", filterDesc)
+			progress := func(format string, a ...any) {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, format, a...)
+				}
 			}
 
-			fmt.Fprintln(os.Stderr, "  [1/2] Extracting packet data and decoding gRPC calls ...")
+			filterDesc := filter.Describe(opts.Filter)
+			progress("Analyzing %s ...\n", args[0])
+			if filterDesc != "" {
+				progress("  Filter: %s\n", filterDesc)
+			}
+
+			progress("  [1/2] Extracting packet data and decoding gRPC calls ...\n")
 			result, err := analysis.Run(args[0], opts)
 			if err != nil {
 				if errors.Is(err, analysis.ErrNoPacketsAfterFilter) {
@@ -50,23 +61,27 @@ func buildCommand() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "        %s packets  |  %s  |  %.1fs window  |  %s gRPC calls\n",
+			progress("        %s packets  |  %s  |  %.1fs window  |  %s gRPC calls\n",
 				config.FmtNum(result.PacketCount),
 				config.FmtBytes(result.TotalBytes),
 				result.Duration,
 				config.FmtNum(result.GRPCCount),
 			)
 
-			fmt.Fprintln(os.Stderr, "  [2/2] Writing output files ...")
+			if jsonOut {
+				return writeJSON(result)
+			}
+
+			progress("  [2/2] Writing output files ...\n")
 			paths, err := analysis.WriteResult(args[0], result)
 			if err != nil {
 				return err
 			}
 
-			fmt.Fprintln(os.Stderr, "\n✓  Done.")
-			fmt.Fprintf(os.Stderr, "   Flow diagram : %s\n", paths[0])
-			fmt.Fprintf(os.Stderr, "   Statistics   : %s\n", paths[1])
-			fmt.Fprintln(os.Stderr)
+			progress("\n✓  Done.\n")
+			progress("   Flow diagram : %s\n", paths[0])
+			progress("   Statistics   : %s\n", paths[1])
+			progress("\n")
 			return nil
 		},
 	}
@@ -77,6 +92,8 @@ func buildCommand() *cobra.Command {
 	cmd.Flags().StringVar(&excludeHost, "exclude-host", "", "comma-separated hosts to exclude")
 	cmd.Flags().BoolVar(&noInterservice, "no-interservice", false,
 		"exclude temporal-history, temporal-matching, temporal-internal-worker")
+	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress progress output")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "write JSON analysis result to stdout instead of HTML/Markdown files")
 
 	// Short aliases matching the Python script.
 	cmd.Flags().StringVar(&onlyHost, "oh", "", "alias for --only-host")
@@ -89,6 +106,32 @@ func buildCommand() *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("oh", "xh")
 
 	return cmd
+}
+
+// jsonOutput is the structure written to stdout when --json is used.
+type jsonOutput struct {
+	PcapName    string            `json:"pcap"`
+	Duration    float64           `json:"duration_s"`
+	PacketCount int               `json:"packet_count"`
+	GRPCCount   int               `json:"grpc_count"`
+	FilterDesc  string            `json:"filter,omitempty"`
+	Packets     []tshark.Packet   `json:"packets"`
+	GRPCCalls   []tshark.GRPCCall `json:"grpc_calls"`
+}
+
+func writeJSON(result *analysis.Result) error {
+	out := jsonOutput{
+		PcapName:    result.PcapName,
+		Duration:    result.Duration,
+		PacketCount: result.PacketCount,
+		GRPCCount:   result.GRPCCount,
+		FilterDesc:  result.FilterDesc,
+		Packets:     result.Packets,
+		GRPCCalls:   result.GRPCCalls,
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func buildOptions(only, exclude, onlyHost, excludeHost string, noInterservice bool) analysis.Options {

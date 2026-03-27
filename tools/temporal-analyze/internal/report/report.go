@@ -210,6 +210,73 @@ func GenerateStats(pcapName string, packets []tshark.Packet, calls []tshark.GRPC
 	table(&b, []string{"Source", "Destination", "Protocol / Port", "Packets", "Bytes"}, connRows)
 	b.WriteString("---\n")
 
+	// Network Health
+	heading(&b, 2, "Network Health")
+
+	totalRetransmits := 0
+	type retKey struct{ src, dst string }
+	retMap := make(map[retKey]int)
+	var rttSamples []float64
+	for _, p := range packets {
+		if p.Retransmit {
+			totalRetransmits++
+			k := retKey{config.Resolve(p.Src), config.Resolve(p.Dst)}
+			retMap[k]++
+		}
+		if p.RTT > 0 {
+			rttSamples = append(rttSamples, p.RTT*1000) // convert to ms
+		}
+	}
+
+	heading(&b, 3, "TCP Retransmissions")
+	if totalRetransmits == 0 {
+		b.WriteString("_No retransmissions detected._\n\n")
+	} else {
+		retPct := 100 * float64(totalRetransmits) / float64(totalPkts)
+		fmt.Fprintf(&b, "**%s** retransmitted packet(s) (**%.2f%%** of traffic)\n\n", config.FmtNum(totalRetransmits), retPct)
+		type retEntry struct {
+			src, dst string
+			count    int
+		}
+		retSlice := make([]retEntry, 0, len(retMap))
+		for k, v := range retMap {
+			retSlice = append(retSlice, retEntry{k.src, k.dst, v})
+		}
+		sort.Slice(retSlice, func(i, j int) bool { return retSlice[i].count > retSlice[j].count })
+		if len(retSlice) > 5 {
+			retSlice = retSlice[:5]
+		}
+		retRows := make([][]string, len(retSlice))
+		for i, e := range retSlice {
+			retRows[i] = []string{e.src, e.dst, config.FmtNum(e.count)}
+		}
+		table(&b, []string{"Source", "Destination", "Retransmits"}, retRows)
+	}
+
+	heading(&b, 3, "TCP Round-Trip Times")
+	if len(rttSamples) == 0 {
+		b.WriteString("_No RTT samples available in this capture._\n\n")
+	} else {
+		sort.Float64s(rttSamples)
+		sum := 0.0
+		for _, r := range rttSamples {
+			sum += r
+		}
+		avg := sum / float64(len(rttSamples))
+		p95idx := int(float64(len(rttSamples)) * 0.95)
+		if p95idx >= len(rttSamples) {
+			p95idx = len(rttSamples) - 1
+		}
+		table(&b, []string{"Metric", "Value"}, [][]string{
+			{"Samples", config.FmtNum(len(rttSamples))},
+			{"Min RTT", fmt.Sprintf("%.3f ms", rttSamples[0])},
+			{"Avg RTT", fmt.Sprintf("%.3f ms", avg)},
+			{"p95 RTT", fmt.Sprintf("%.3f ms", rttSamples[p95idx])},
+			{"Max RTT", fmt.Sprintf("%.3f ms", rttSamples[len(rttSamples)-1])},
+		})
+	}
+	b.WriteString("---\n")
+
 	// gRPC method calls
 	heading(&b, 2, "gRPC Method Calls")
 	if len(calls) == 0 {
@@ -257,6 +324,53 @@ func GenerateStats(pcapName string, packets []tshark.Packet, calls []tshark.GRPC
 			methodRows[i] = []string{"`" + m.method + "`", config.FmtNum(m.data.count), strings.Join(srcs, ", ")}
 		}
 		table(&b, []string{"Method", "Calls", "Called By"}, methodRows)
+
+		// gRPC status code breakdown
+		statusCounts := make(map[int]int)
+		for _, c := range calls {
+			statusCounts[c.StatusCode]++
+		}
+		if len(statusCounts) > 1 || (len(statusCounts) == 1 && statusCounts[-1] != len(calls)) {
+			heading(&b, 3, "gRPC Status Codes")
+			type statusEntry struct {
+				code  int
+				count int
+			}
+			statusSlice := make([]statusEntry, 0, len(statusCounts))
+			for code, n := range statusCounts {
+				statusSlice = append(statusSlice, statusEntry{code, n})
+			}
+			sort.Slice(statusSlice, func(i, j int) bool { return statusSlice[i].code < statusSlice[j].code })
+			statusLabel := func(code int) string {
+				switch code {
+				case -1:
+					return "unknown (no response captured)"
+				case 0:
+					return "OK"
+				case 1:
+					return "CANCELLED"
+				case 2:
+					return "UNKNOWN"
+				case 3:
+					return "INVALID_ARGUMENT"
+				case 4:
+					return "DEADLINE_EXCEEDED"
+				case 5:
+					return "NOT_FOUND"
+				case 13:
+					return "INTERNAL"
+				case 14:
+					return "UNAVAILABLE"
+				default:
+					return fmt.Sprintf("code %d", code)
+				}
+			}
+			statusRows := make([][]string, len(statusSlice))
+			for i, e := range statusSlice {
+				statusRows[i] = []string{fmt.Sprintf("%d", e.code), statusLabel(e.code), config.FmtNum(e.count)}
+			}
+			table(&b, []string{"Code", "Meaning", "Calls"}, statusRows)
+		}
 		b.WriteString("---\n")
 
 		// Build method count lookup
