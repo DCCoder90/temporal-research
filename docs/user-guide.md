@@ -191,9 +191,13 @@ Switch to the **Statistics** tab to see a rendered Markdown report covering:
 - gRPC Method Calls (frequency table, status codes, Temporal-specific insights)
 - Top Talkers
 
+![Statistics tab](images/traffic-analysis.png)
+
 ### Query tab
 
 The **Query** tab provides a full SQL engine over the packet and gRPC call data loaded from the last analysis. See [SQL query reference](#sql-query-reference) for the full schema.
+
+![Query tab](images/query.png)
 
 #### Editor
 

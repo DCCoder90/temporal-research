@@ -16,6 +16,8 @@ Given a `.pcap` file captured from a running Temporal cluster, `temporal-lens`:
 - Generates a **statistics report** — protocol breakdown, connection matrix, network health (RTT, retransmissions), and Temporal-specific insights
 - Exposes a **SQL query engine** against the packet and gRPC call data (GUI only)
 
+![gRPC Sequence Diagram](images/sequence-diagram.png)
+
 ---
 
 ## Installation
