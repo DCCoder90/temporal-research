@@ -71,7 +71,7 @@ mermaid.initialize({
   startOnLoad: false,
   theme: 'default',
   sequence: { showSequenceNumbers: true, mirrorActors: false, useMaxWidth: false },
-  flowchart: { curve: 'basis', useMaxWidth: false },
+  flowchart: { curve: 'basis', useMaxWidth: false, rankSpacing: 200 },
 });
 
 // ── Tab switching ──────────────────────────────────────────────────────────
@@ -286,9 +286,11 @@ async function renderResult(result) {
     svg.style.width = '100%';
     svg.style.height = '100%';
     const mermaidEl = svg.closest('.mermaid');
-    const isSeq = mermaidEl && (mermaidEl.id === 'mermaid-traffic' || mermaidEl.id === 'mermaid-grpc');
-    const diagramWrap = isSeq ? svg.closest('.diagram-wrap') : null;
-    let updateSticky = null;
+    const diagramWrap = svg.closest('.diagram-wrap');
+    const isSeq  = mermaidEl && (mermaidEl.id === 'mermaid-traffic' || mermaidEl.id === 'mermaid-grpc');
+    const isFlow = mermaidEl && mermaidEl.id === 'mermaid-flow';
+    let updateSticky  = null;
+    let updateMinimap = null;
     const instance = svgPanZoom(svg, {
       zoomEnabled: true,
       controlIconsEnabled: false,
@@ -298,14 +300,17 @@ async function renderResult(result) {
       maxZoom: 30,
       zoomScaleSensitivity: 0.3,
       mouseWheelZoomEnabled: true,
-      onPan:     () => { if (updateSticky) updateSticky(); },
-      onZoom:    () => { if (updateSticky) updateSticky(); },
-      onZoomEnd: () => { if (updateSticky) updateSticky(); },
+      onPan:     () => { if (updateSticky) updateSticky(); if (updateMinimap) updateMinimap(); },
+      onZoom:    () => { if (updateSticky) updateSticky(); if (updateMinimap) updateMinimap(); },
+      onZoomEnd: () => { if (updateSticky) updateSticky(); if (updateMinimap) updateMinimap(); },
     });
     panZoomInstances.push(instance);
     if (isSeq && diagramWrap) {
       const src = mermaidEl.id === 'mermaid-traffic' ? result.TrafficSeq : grpcDiagrams[0];
       updateSticky = makeStickyHeader(diagramWrap, svg, instance, src);
+    }
+    if (isFlow && diagramWrap) {
+      updateMinimap = makeFlowMinimap(diagramWrap, svg, instance);
     }
   });
 
@@ -425,6 +430,133 @@ function makeStickyHeader(diagramWrap, svgEl, pzInstance, diagramSource) {
       labelEls[i].style.left = (svgX * z + p.x) + 'px';
     });
   }
+
+  update();
+  return update;
+}
+
+// ── Flow diagram minimap ───────────────────────────────────────────────────
+// Builds a small thumbnail overlay (bottom-right of diagram-wrap) showing the
+// full diagram at fit state and a draggable viewport rect.
+// Always visible once created. Click = pan; dblclick = zoom in; drag = pan.
+function makeFlowMinimap(diagramWrap, svgEl, pzInstance) {
+  // Cleanup previous minimap's window listeners before replacing.
+  const existing = diagramWrap.querySelector('.flow-minimap');
+  if (existing) {
+    if (existing._cleanup) existing._cleanup();
+    existing.remove();
+  }
+
+  const MM_W = 200;
+  const MM_H = 140;
+
+  const sizes   = pzInstance.getSizes();
+  const contW   = sizes.width;
+  const contH   = sizes.height;
+  const initPan = pzInstance.getPan(); // centering pan at fit (zoom=1)
+
+  // Scale the container into the minimap, preserving aspect ratio.
+  const scaleF  = Math.min(MM_W / contW, MM_H / contH);
+  const thumbW  = contW * scaleF;
+  const thumbH  = contH * scaleF;
+  const thumbX  = (MM_W - thumbW) / 2; // centering offsets
+  const thumbY  = (MM_H - thumbH) / 2;
+
+  // ── Build minimap container ──
+  const mm = document.createElement('div');
+  mm.className = 'flow-minimap';
+
+  // Thumbnail: clone the SVG at its current (fit-state) viewport transform,
+  // drop svg-pan-zoom's inline size styles, set explicit px dims, then use
+  // a CSS-scaled wrapper so the full diagram is always visible in the minimap.
+  const clone = svgEl.cloneNode(true);
+  clone.removeAttribute('style');          // remove svg-pan-zoom's width/height %
+  clone.setAttribute('width',  contW);
+  clone.setAttribute('height', contH);
+  clone.style.cssText = 'display:block;overflow:hidden;pointer-events:none;';
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = `position:absolute;left:${thumbX}px;top:${thumbY}px;` +
+    `width:${contW}px;height:${contH}px;` +
+    `transform-origin:top left;transform:scale(${scaleF});` +
+    `pointer-events:none;overflow:hidden;`;
+  wrap.appendChild(clone);
+  mm.appendChild(wrap);
+
+  // Viewport rect overlay (sits on top of the wrapper, in minimap coords).
+  const rect = document.createElement('div');
+  rect.className = 'flow-minimap-rect';
+  mm.appendChild(rect);
+
+  diagramWrap.appendChild(mm);
+
+  // ── Coordinate math ──
+  // svg-pan-zoom: getZoom()=1 at fit, getPan() in screen px.
+  // At zoom z, pan p: visible left edge in container-space = -p.x/z + initPan.x
+  // Map container-space to minimap-space: multiply by scaleF, offset by thumbX/Y.
+  function update() {
+    const z = pzInstance.getZoom();
+    const p = pzInstance.getPan();
+
+    const rW = thumbW / z;
+    const rH = thumbH / z;
+    rect.style.left   = (thumbX + (-p.x / z + initPan.x) * scaleF) + 'px';
+    rect.style.top    = (thumbY + (-p.y / z + initPan.y) * scaleF) + 'px';
+    rect.style.width  = rW + 'px';
+    rect.style.height = rH + 'px';
+  }
+
+  // ── Pan main diagram so viewport centres on minimap point (mx, my) ──
+  // Inverse of update(): solve for p.x given desired visible-centre = (mx,my).
+  function panToPoint(mx, my) {
+    const z = pzInstance.getZoom();
+    pzInstance.pan({
+      x: z * initPan.x + contW / 2 - z * (mx - thumbX) / scaleF,
+      y: z * initPan.y + contH / 2 - z * (my - thumbY) / scaleF,
+    });
+    update();
+  }
+
+  // ── Drag state ──
+  let dragging         = false;
+  let dragAnchorClient = null;
+  let dragAnchorPan    = null;
+
+  mm.addEventListener('mousedown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const bcr = mm.getBoundingClientRect();
+    panToPoint(e.clientX - bcr.left, e.clientY - bcr.top);
+    dragging         = true;
+    dragAnchorClient = { x: e.clientX, y: e.clientY };
+    dragAnchorPan    = pzInstance.getPan();
+  });
+
+  // Attach move/up to window so dragging outside the minimap still works.
+  const onMove = e => {
+    if (!dragging) return;
+    const z = pzInstance.getZoom();
+    pzInstance.pan({
+      x: dragAnchorPan.x - (e.clientX - dragAnchorClient.x) / scaleF * z,
+      y: dragAnchorPan.y - (e.clientY - dragAnchorClient.y) / scaleF * z,
+    });
+    update();
+  };
+  const onUp = () => { dragging = false; };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup',  onUp);
+
+  mm._cleanup = () => {
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup',  onUp);
+  };
+
+  mm.addEventListener('dblclick', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    pzInstance.zoomIn();
+    update();
+  });
 
   update();
   return update;
