@@ -279,7 +279,7 @@ async function renderResult(result) {
   switchView('diagrams');
 
   // Render Mermaid diagrams.
-  await mermaid.run({ querySelector: '.mermaid' });
+  await mermaid.run({ querySelector: '.mermaid:not(:empty)' });
 
   // Attach svg-pan-zoom to each rendered SVG.
   document.querySelectorAll('.diagram-wrap .mermaid svg').forEach(svg => {
