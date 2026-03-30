@@ -298,6 +298,35 @@ body {
   height: 100% !important;
 }
 
+/* ── Sticky participant header ─────────────────────────────────────────────── */
+.sticky-actors {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 34px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 10;
+  background: linear-gradient(to bottom, var(--surface) 60%, transparent);
+}
+
+.sticky-actor-label {
+  position: absolute;
+  top: 5px;
+  font-size: .72rem;
+  font-weight: 600;
+  color: #4a4a8a;
+  background: #eeeeff;
+  border: 1px solid #c8c0ff;
+  border-radius: 4px;
+  padding: .15rem .45rem;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ── View toggle tabs ──────────────────────────────────────────────────────── */
 #view-toggle { display: flex; flex-direction: column; gap: .5rem; }
 

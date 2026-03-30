@@ -285,6 +285,10 @@ async function renderResult(result) {
   document.querySelectorAll('.diagram-wrap .mermaid svg').forEach(svg => {
     svg.style.width = '100%';
     svg.style.height = '100%';
+    const mermaidEl = svg.closest('.mermaid');
+    const isSeq = mermaidEl && (mermaidEl.id === 'mermaid-traffic' || mermaidEl.id === 'mermaid-grpc');
+    const diagramWrap = isSeq ? svg.closest('.diagram-wrap') : null;
+    let updateSticky = null;
     const instance = svgPanZoom(svg, {
       zoomEnabled: true,
       controlIconsEnabled: false,
@@ -294,8 +298,15 @@ async function renderResult(result) {
       maxZoom: 30,
       zoomScaleSensitivity: 0.3,
       mouseWheelZoomEnabled: true,
+      onPan:     () => { if (updateSticky) updateSticky(); },
+      onZoom:    () => { if (updateSticky) updateSticky(); },
+      onZoomEnd: () => { if (updateSticky) updateSticky(); },
     });
     panZoomInstances.push(instance);
+    if (isSeq && diagramWrap) {
+      const src = mermaidEl.id === 'mermaid-traffic' ? result.TrafficSeq : grpcDiagrams[0];
+      updateSticky = makeStickyHeader(diagramWrap, svg, instance, src);
+    }
   });
 
   // Find the gRPC pan-zoom instance by element position, not array length,
@@ -329,6 +340,8 @@ async function grpcChangePage(delta) {
   if (svg) {
     svg.style.width = '100%';
     svg.style.height = '100%';
+    const diagramWrap = svg.closest('.diagram-wrap');
+    let updateSticky = null;
     panZoomInstances[grpcPanZoomIdx] = svgPanZoom(svg, {
       zoomEnabled: true,
       controlIconsEnabled: false,
@@ -338,12 +351,83 @@ async function grpcChangePage(delta) {
       maxZoom: 30,
       zoomScaleSensitivity: 0.3,
       mouseWheelZoomEnabled: true,
+      onPan:     () => { if (updateSticky) updateSticky(); },
+      onZoom:    () => { if (updateSticky) updateSticky(); },
+      onZoomEnd: () => { if (updateSticky) updateSticky(); },
     });
+    if (diagramWrap) {
+      updateSticky = makeStickyHeader(diagramWrap, svg, panZoomInstances[grpcPanZoomIdx], grpcDiagrams[grpcPage]);
+    }
   }
 
   document.getElementById('grpc-page-label').textContent = `Page ${grpcPage + 1} of ${grpcDiagrams.length}`;
   document.getElementById('grpc-prev-btn').disabled = grpcPage === 0;
   document.getElementById('grpc-next-btn').disabled = grpcPage === grpcDiagrams.length - 1;
+}
+
+// ── Sticky participant header for sequence diagrams ────────────────────────
+// Parses participant display names from the Mermaid source string, finds their
+// SVG text elements by content, then builds an overlay bar at the top of the
+// diagram-wrap and returns an update() function called on every pan/zoom event.
+function makeStickyHeader(diagramWrap, svgEl, pzInstance, diagramSource) {
+  // Remove any bar left over from a previous render of this diagram.
+  const existing = diagramWrap.querySelector('.sticky-actors');
+  if (existing) existing.remove();
+
+  // Parse participant display names from the Mermaid source.
+  // Lines look like: participant <id> as <display name>
+  const participants = [];
+  for (const line of (diagramSource || '').split('\n')) {
+    const m = line.match(/^\s*participant\s+\S+\s+as\s+(.+?)\s*$/);
+    if (m) participants.push(m[1]);
+  }
+  if (participants.length === 0) return null;
+
+  // Capture the svg-pan-zoom state at the moment of first render (after fit/center).
+  const zoom0   = pzInstance.getZoom();
+  const pan0    = pzInstance.getPan();
+  const wrapBCR = diagramWrap.getBoundingClientRect();
+
+  // Find SVG text elements whose content matches a participant name,
+  // then compute each one's center X in SVG viewport-group coordinates
+  // (invariant to future pan/zoom changes).
+  const allText = [...svgEl.querySelectorAll('text')];
+  const actorData = [];
+  for (const name of participants) {
+    const textEl = allText.find(t => t.textContent.trim() === name);
+    if (textEl) {
+      const r = textEl.getBoundingClientRect();
+      const screenCenterX = r.left - wrapBCR.left + r.width / 2;
+      actorData.push({ svgX: (screenCenterX - pan0.x) / zoom0, label: name });
+    }
+  }
+  if (actorData.length === 0) return null;
+
+  // Build the overlay bar.
+  const bar = document.createElement('div');
+  bar.className = 'sticky-actors';
+
+  const labelEls = actorData.map(({ label }) => {
+    const span = document.createElement('span');
+    span.className = 'sticky-actor-label';
+    span.textContent = label;
+    bar.appendChild(span);
+    return span;
+  });
+
+  diagramWrap.appendChild(bar);
+
+  // Position each label so it is centred above its participant column.
+  function update() {
+    const z = pzInstance.getZoom();
+    const p = pzInstance.getPan();
+    actorData.forEach(({ svgX }, i) => {
+      labelEls[i].style.left = (svgX * z + p.x) + 'px';
+    });
+  }
+
+  update();
+  return update;
 }
 
 // ── Zoom controls ──────────────────────────────────────────────────────────
